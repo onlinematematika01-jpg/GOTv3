@@ -14,6 +14,8 @@ router = Router()
 
 # Admin tomonidan o'zgartiriluvchi foiz stavkasi (yoki DB dan olish)
 CURRENT_INTEREST_RATE = settings.DEFAULT_INTEREST_RATE
+BANK_MIN_LOAN = 100
+BANK_MAX_LOAN = 100_000
 
 
 class BankState(StatesGroup):
@@ -56,8 +58,8 @@ async def request_loan(callback: CallbackQuery, state: FSMContext):
 async def process_loan(message: Message, state: FSMContext):
     try:
         amount = int(message.text.strip())
-        if amount < 100:
-            await message.answer("❌ Minimal qarz miqdori: 100 tanga.")
+        if amount < BANK_MIN_LOAN or amount > BANK_MAX_LOAN:
+            await message.answer(f"❌ Qarz miqdori {BANK_MIN_LOAN:,} — {BANK_MAX_LOAN:,} tanga oralig'ida bo'lishi kerak.")
             return
     except ValueError:
         await message.answer("❌ Iltimos, raqam kiriting.")
