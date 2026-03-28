@@ -6,8 +6,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def _fix_db_url(url: str) -> str:
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
+
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    _fix_db_url(settings.DATABASE_URL),
     echo=False,
     pool_size=10,
     max_overflow=20,
@@ -30,7 +37,7 @@ async def create_tables():
 
 
 async def _seed_market_prices():
-    from database.models import MarketPrice, RegionEnum
+    from database.models import MarketPrice
     from config.settings import settings as s
     async with AsyncSessionFactory() as session:
         from sqlalchemy import select
