@@ -5,15 +5,14 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command
 from database.engine import AsyncSessionFactory
 from database.repositories import UserRepo, HouseRepo, MarketRepo
-from database.models import RoleEnum
+from database.models import RoleEnum, RegionEnum, House
 from keyboards import admin_keyboard
 from config.settings import settings
-from sqlalchemy import select, update
-from database.models import User, MarketPrice
+from sqlalchemy import select, update, delete, text
+from database.models import User, MarketPrice, IronBankLoan, Alliance, War, Chronicle, InternalMessage
 
 router = Router()
 
-# Admin ID lar — .env dan to'ldiring
 ADMIN_IDS: list[int] = settings.ADMIN_IDS
 
 
@@ -28,6 +27,17 @@ class AdminState(StatesGroup):
     waiting_broadcast = State()
     waiting_give_gold_user = State()
     waiting_give_gold_amount = State()
+    # Yangi xonadon qo'shish
+    waiting_house_name = State()
+    waiting_house_region = State()
+    # Bank limit sozlash
+    waiting_bank_min = State()
+    waiting_bank_max = State()
+
+
+# ─── BANK LIMIT — runtime o'zgaruvchilar ───
+BANK_MIN_LOAN = 100
+BANK_MAX_LOAN = 100_000
 
 
 @router.message(F.text == "🔧 Admin Panel")
@@ -54,6 +64,7 @@ async def admin_panel(message: Message):
     await message.answer(text, reply_markup=admin_keyboard(), parse_mode="HTML")
 
 
+# ─── NARXLAR ───────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "admin:prices")
 async def admin_prices_menu(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
@@ -112,6 +123,7 @@ async def admin_price_value(message: Message, state: FSMContext):
     await state.clear()
 
 
+# ─── BANK FOIZ ─────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "admin:interest")
 async def admin_interest(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
@@ -138,7 +150,6 @@ async def admin_set_interest(message: Message, state: FSMContext):
         await message.answer("❌ 0 dan 100 gacha raqam kiriting.")
         return
 
-    # Runtime da o'zgartirish (yoki DB ga saqlash mumkin)
     import handlers.bank as bank_module
     bank_module.CURRENT_INTEREST_RATE = rate / 100
     settings.DEFAULT_INTEREST_RATE = rate / 100
@@ -147,6 +158,76 @@ async def admin_set_interest(message: Message, state: FSMContext):
     await state.clear()
 
 
+# ─── BANK LIMIT (MIN / MAX) ─────────────────────────────────────────────────
+@router.callback_query(F.data == "admin:bank_limits")
+async def admin_bank_limits(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    import handlers.admin as self_module
+    await state.set_state(AdminState.waiting_bank_min)
+    await callback.answer()
+    await callback.message.answer(
+        f"🏦 <b>Bank qarz limiti sozlash</b>\n\n"
+        f"Joriy minimal qarz: {BANK_MIN_LOAN:,} tanga\n"
+        f"Joriy maksimal qarz: {BANK_MAX_LOAN:,} tanga\n\n"
+        f"Yangi MINIMAL miqdorni kiriting:",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_bank_min)
+async def admin_set_bank_min(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        val = int(message.text.strip())
+        if val <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Musbat raqam kiriting.")
+        return
+
+    import handlers.bank as bank_module
+    global BANK_MIN_LOAN
+    BANK_MIN_LOAN = val
+    bank_module.BANK_MIN_LOAN = val
+
+    await state.update_data(bank_min=val)
+    await state.set_state(AdminState.waiting_bank_max)
+    await message.answer(f"✅ Minimal: {val:,} tanga.\n\nEndi MAKSIMAL miqdorni kiriting:")
+
+
+@router.message(AdminState.waiting_bank_max)
+async def admin_set_bank_max(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    try:
+        val = int(message.text.strip())
+        if val <= data.get("bank_min", 0):
+            await message.answer("❌ Maksimal minimal dan katta bo'lishi kerak.")
+            return
+    except ValueError:
+        await message.answer("❌ Musbat raqam kiriting.")
+        return
+
+    import handlers.bank as bank_module
+    global BANK_MAX_LOAN
+    BANK_MAX_LOAN = val
+    bank_module.BANK_MAX_LOAN = val
+
+    await message.answer(
+        f"✅ <b>Bank limiti yangilandi!</b>\n\n"
+        f"Minimal: {data['bank_min']:,} tanga\n"
+        f"Maksimal: {val:,} tanga",
+        parse_mode="HTML"
+    )
+    await state.clear()
+
+
+# ─── BROADCAST ─────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "admin:broadcast")
 async def admin_broadcast_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
@@ -189,6 +270,7 @@ async def admin_do_broadcast(message: Message, state: FSMContext):
     await state.clear()
 
 
+# ─── FOYDALANUVCHILAR ───────────────────────────────────────────────────────
 @router.callback_query(F.data == "admin:users")
 async def admin_users(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -213,6 +295,7 @@ async def admin_users(callback: CallbackQuery):
     await callback.message.answer(text, parse_mode="HTML")
 
 
+# ─── XONADONLAR ────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "admin:houses")
 async def admin_houses(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -240,9 +323,178 @@ async def admin_houses(callback: CallbackQuery):
     await callback.message.answer(text, parse_mode="HTML")
 
 
+# ─── YANGI XONADON QO'SHISH ────────────────────────────────────────────────
+REGION_LIST = {
+    "1": RegionEnum.NORTH,
+    "2": RegionEnum.VALE,
+    "3": RegionEnum.RIVERLANDS,
+    "4": RegionEnum.IRON_ISLANDS,
+    "5": RegionEnum.WESTERLANDS,
+    "6": RegionEnum.KINGS_LANDING,
+    "7": RegionEnum.REACH,
+    "8": RegionEnum.STORMLANDS,
+    "9": RegionEnum.DORNE,
+}
+
+REGION_NAMES = {
+    "1": "Shimol",
+    "2": "Vodiy",
+    "3": "Daryo yerlari",
+    "4": "Temir orollar",
+    "5": "G'arbiy yerlar",
+    "6": "Qirollik bandargohi",
+    "7": "Tyrellar vodiysi",
+    "8": "Bo'ronli yerlar",
+    "9": "Dorn",
+}
+
+
+@router.callback_query(F.data == "admin:add_house")
+async def admin_add_house_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    # Bo'sh (xonadonsiz) regionlarni topamiz
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(select(House.region))
+        used_regions = {r for r, in result.all()}
+
+    free = {k: v for k, v in REGION_NAMES.items() if REGION_LIST[k] not in used_regions}
+
+    if not free:
+        await callback.answer("❌ Barcha xududlarda xonadon mavjud!", show_alert=True)
+        return
+
+    region_text = "\n".join([f"{k}. {v}" for k, v in free.items()])
+    await state.update_data(free_regions=list(free.keys()))
+    await state.set_state(AdminState.waiting_house_region)
+    await callback.answer()
+    await callback.message.answer(
+        f"🏰 <b>Yangi xonadon qo'shish</b>\n\n"
+        f"Bo'sh xududlar:\n{region_text}\n\n"
+        f"Xududning raqamini kiriting:",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_house_region)
+async def admin_add_house_region(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+
+    data = await state.get_data()
+    choice = message.text.strip()
+
+    if choice not in data.get("free_regions", []):
+        await message.answer("❌ Noto'g'ri raqam. Ro'yxatdan tanlang.")
+        return
+
+    await state.update_data(chosen_region=choice)
+    await state.set_state(AdminState.waiting_house_name)
+    await message.answer(
+        f"✅ Xudud: <b>{REGION_NAMES[choice]}</b>\n\n"
+        f"Xonadon nomini kiriting (masalan: Targaryen xonadoni):",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_house_name)
+async def admin_add_house_name(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+
+    data = await state.get_data()
+    name = message.text.strip()
+    region_enum = REGION_LIST[data["chosen_region"]]
+
+    async with AsyncSessionFactory() as session:
+        new_house = House(name=name, region=region_enum)
+        session.add(new_house)
+        await session.commit()
+
+    await message.answer(
+        f"✅ <b>{name}</b> xonadoni <b>{REGION_NAMES[data['chosen_region']]}</b> xududiga qo'shildi!",
+        parse_mode="HTML"
+    )
+    await state.clear()
+
+
+# ─── BAZANI TOZALASH ───────────────────────────────────────────────────────
+@router.callback_query(F.data == "admin:reset_db")
+async def admin_reset_db_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="⚠️ HA, TOZALA!", callback_data="admin:reset_db_confirm"),
+        InlineKeyboardButton(text="❌ Bekor", callback_data="admin:reset_db_cancel"),
+    ]])
+
+    await callback.answer()
+    await callback.message.answer(
+        "⚠️ <b>DIQQAT!</b>\n\n"
+        "Bu amal barcha foydalanuvchilar, urushlar, qarzlar va xronikalarni o'chiradi.\n"
+        "Xonadonlar saqlanib qoladi.\n\n"
+        "Davom etasizmi?",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "admin:reset_db_cancel")
+async def admin_reset_cancel(callback: CallbackQuery):
+    await callback.answer("Bekor qilindi.", show_alert=True)
+    await callback.message.delete()
+
+
+@router.callback_query(F.data == "admin:reset_db_confirm")
+async def admin_reset_db_execute(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    await callback.answer()
+    await callback.message.answer("⏳ Baza tozalanmoqda...")
+
+    async with AsyncSessionFactory() as session:
+        # Bog'liq jadvallarni tartib bilan tozalash
+        await session.execute(delete(IronBankLoan))
+        await session.execute(delete(InternalMessage))
+        await session.execute(delete(Chronicle))
+        await session.execute(delete(Alliance))
+        await session.execute(delete(War))
+        # Foydalanuvchilarni tozalash
+        await session.execute(delete(User))
+        # Xonadonlarni reset qilish (o'chirmasdan)
+        await session.execute(
+            update(House).values(
+                lord_id=None,
+                high_lord_id=None,
+                treasury=0,
+                total_soldiers=0,
+                total_dragons=0,
+                total_scorpions=0,
+                is_under_occupation=False,
+                occupier_house_id=None,
+                permanent_tax_rate=0.0,
+            )
+        )
+        await session.commit()
+
+    await callback.message.answer(
+        "✅ <b>Baza tozalandi!</b>\n\n"
+        "Foydalanuvchilar, urushlar, qarzlar va xronikalar o'chirildi.\n"
+        "Xonadonlar saqlanib qoldi (reset holatida).",
+        parse_mode="HTML"
+    )
+
+
+# ─── OLTIN BERISH ──────────────────────────────────────────────────────────
 @router.message(Command("give_gold"))
 async def admin_give_gold(message: Message, state: FSMContext):
-    """Admin buyrug'i: /give_gold <user_id> <amount>"""
     if not is_admin(message.from_user.id):
         return
 
@@ -268,9 +520,6 @@ async def admin_give_gold(message: Message, state: FSMContext):
 
     await message.answer(f"✅ {target.full_name} ga {amount} oltin berildi!")
     try:
-        await message.bot.send_message(
-            target_id,
-            f"🎁 Admindan {amount} oltin sovg'a qilindi!",
-        )
+        await message.bot.send_message(target_id, f"🎁 Admindan {amount} oltin sovg'a qilindi!")
     except Exception:
         pass
