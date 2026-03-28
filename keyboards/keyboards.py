@@ -79,6 +79,9 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="👥 Foydalanuvchilar", callback_data="admin:users")
     builder.button(text="🏰 Xonadonlar", callback_data="admin:houses")
     builder.button(text="📢 Xabar Yuborish", callback_data="admin:broadcast")
+    builder.button(text="🏰 Xonadon Qo'shish", callback_data="admin:add_house")
+    builder.button(text="🏦 Bank Limiti", callback_data="admin:bank_limits")
+    builder.button(text="🗑 Bazani Tozalash", callback_data="admin:reset_db")
     builder.adjust(2)
     return builder.as_markup()
 
