@@ -460,15 +460,7 @@ async def admin_reset_db_execute(callback: CallbackQuery):
     await callback.message.answer("⏳ Baza tozalanmoqda...")
 
     async with AsyncSessionFactory() as session:
-        # Bog'liq jadvallarni tartib bilan tozalash
-        await session.execute(delete(IronBankLoan))
-        await session.execute(delete(InternalMessage))
-        await session.execute(delete(Chronicle))
-        await session.execute(delete(Alliance))
-        await session.execute(delete(War))
-        # Foydalanuvchilarni tozalash
-        await session.execute(delete(User))
-        # Xonadonlarni reset qilish (o'chirmasdan)
+        # 1. Avval xonadonlardagi foreign key larni NULL ga tushirish
         await session.execute(
             update(House).values(
                 lord_id=None,
@@ -482,6 +474,16 @@ async def admin_reset_db_execute(callback: CallbackQuery):
                 permanent_tax_rate=0.0,
             )
         )
+        await session.flush()
+        # 2. Bog'liq jadvallarni tozalash
+        await session.execute(delete(IronBankLoan))
+        await session.execute(delete(InternalMessage))
+        await session.execute(delete(Chronicle))
+        await session.execute(delete(Alliance))
+        await session.execute(delete(War))
+        await session.flush()
+        # 3. Foydalanuvchilarni o'chirish
+        await session.execute(delete(User))
         await session.commit()
 
     await callback.message.answer(
