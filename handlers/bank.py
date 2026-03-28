@@ -6,13 +6,12 @@ from datetime import datetime, timedelta
 from database.engine import AsyncSessionFactory
 from database.repositories import UserRepo, IronBankRepo
 from database.models import IronBankLoan
-from keyboards import iron_bank_keyboard
+from keyboards import iron_bank_keyboard, back_only_keyboard
 from config.settings import settings
 from sqlalchemy import select
 
 router = Router()
 
-# Admin tomonidan o'zgartiriluvchi foiz stavkasi (yoki DB dan olish)
 CURRENT_INTEREST_RATE = settings.DEFAULT_INTEREST_RATE
 BANK_MIN_LOAN = 100
 BANK_MAX_LOAN = 100_000
@@ -37,10 +36,29 @@ async def iron_bank_menu(message: Message):
             "🏦 <b>TEMIR BANK</b>\n\n"
             f"💰 Sizning oltiningiz: {user.gold:,}\n"
             f"📋 Qarzingiz: {user.debt:,} tanga\n"
-            f"📈 Joriy foiz stavkasi: {CURRENT_INTEREST_RATE * 100:.0f}%\n\n"
+            f"📈 Joriy foiz stavkasi: {CURRENT_INTEREST_RATE * 100:.0f}%\n"
+            f"📊 Qarz limiti: {BANK_MIN_LOAN:,} — {BANK_MAX_LOAN:,} tanga\n\n"
             "⚠️ Qarz to'lanmasa — barcha qo'shin va ajdarlar musodara qilinadi!"
         )
         await message.answer(text, reply_markup=iron_bank_keyboard(), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "bank:back")
+async def bank_back(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    async with AsyncSessionFactory() as session:
+        user_repo = UserRepo(session)
+        user = await user_repo.get_by_id(callback.from_user.id)
+    text = (
+        "🏦 <b>TEMIR BANK</b>\n\n"
+        f"💰 Sizning oltiningiz: {user.gold:,}\n"
+        f"📋 Qarzingiz: {user.debt:,} tanga\n"
+        f"📈 Joriy foiz stavkasi: {CURRENT_INTEREST_RATE * 100:.0f}%\n"
+        f"📊 Qarz limiti: {BANK_MIN_LOAN:,} — {BANK_MAX_LOAN:,} tanga\n\n"
+        "⚠️ Qarz to'lanmasa — barcha qo'shin va ajdarlar musodara qilinadi!"
+    )
+    await callback.answer()
+    await callback.message.edit_text(text, reply_markup=iron_bank_keyboard(), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "bank:loan")
@@ -50,16 +68,25 @@ async def request_loan(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         f"💰 <b>Qarz miqdorini kiriting:</b>\n"
         f"📈 Foiz: {CURRENT_INTEREST_RATE * 100:.0f}%\n"
-        f"(Minimal: 100 tanga)"
+        f"📊 Limit: {BANK_MIN_LOAN:,} — {BANK_MAX_LOAN:,} tanga\n\n"
+        f"Bekor qilish uchun /cancel yozing.",
+        parse_mode="HTML"
     )
 
 
 @router.message(BankState.waiting_loan_amount)
 async def process_loan(message: Message, state: FSMContext):
+    if message.text.strip().lower() == "/cancel":
+        await state.clear()
+        await message.answer("❌ Bekor qilindi.", reply_markup=back_only_keyboard("bank:back"))
+        return
+
     try:
         amount = int(message.text.strip())
         if amount < BANK_MIN_LOAN or amount > BANK_MAX_LOAN:
-            await message.answer(f"❌ Qarz miqdori {BANK_MIN_LOAN:,} — {BANK_MAX_LOAN:,} tanga oralig'ida bo'lishi kerak.")
+            await message.answer(
+                f"❌ Qarz miqdori {BANK_MIN_LOAN:,} — {BANK_MAX_LOAN:,} tanga oralig'ida bo'lishi kerak."
+            )
             return
     except ValueError:
         await message.answer("❌ Iltimos, raqam kiriting.")
@@ -77,8 +104,8 @@ async def process_loan(message: Message, state: FSMContext):
 
         if user.debt > 0:
             await message.answer(
-                f"❌ Avvalgi qarzingizni to'lang!\n"
-                f"Qarz: {user.debt:,} tanga"
+                f"❌ Avvalgi qarzingizni to'lang!\nQarz: {user.debt:,} tanga",
+                reply_markup=back_only_keyboard("bank:back")
             )
             await state.clear()
             return
@@ -87,9 +114,7 @@ async def process_loan(message: Message, state: FSMContext):
         import math
         total_due = math.ceil(amount * (1 + CURRENT_INTEREST_RATE))
 
-        loan = await iron_bank_repo.create_loan(
-            user.id, amount, CURRENT_INTEREST_RATE, due_date
-        )
+        await iron_bank_repo.create_loan(user.id, amount, CURRENT_INTEREST_RATE, due_date)
 
         await message.answer(
             f"🏦 <b>Qarz berildi!</b>\n\n"
@@ -97,6 +122,7 @@ async def process_loan(message: Message, state: FSMContext):
             f"📈 Foiz bilan: {total_due:,} tanga\n"
             f"📅 To'lash muddati: {due_date.strftime('%Y-%m-%d')}\n\n"
             f"⚠️ Muddatda to'lamasangiz — qo'shinlaringiz musodara qilinadi!",
+            reply_markup=back_only_keyboard("bank:back"),
             parse_mode="HTML"
         )
 
@@ -117,12 +143,19 @@ async def request_repay(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await callback.message.answer(
         f"💸 <b>Qarzingiz:</b> {user.debt:,} tanga\n"
-        f"To'lash miqdorini kiriting (yoki 'hammasi'):"
+        f"To'lash miqdorini kiriting (yoki 'hammasi'):\n\n"
+        f"Bekor qilish uchun /cancel yozing.",
+        parse_mode="HTML"
     )
 
 
 @router.message(BankState.waiting_repay_amount)
 async def process_repay(message: Message, state: FSMContext):
+    if message.text.strip().lower() == "/cancel":
+        await state.clear()
+        await message.answer("❌ Bekor qilindi.", reply_markup=back_only_keyboard("bank:back"))
+        return
+
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
         iron_bank_repo = IronBankRepo(session)
@@ -152,10 +185,14 @@ async def process_repay(message: Message, state: FSMContext):
                 f"✅ <b>Qarz to'landi!</b>\n\n"
                 f"💸 To'landi: {result['paid']:,} tanga\n"
                 f"📋 Qolgan qarz: {result['remaining']:,} tanga",
+                reply_markup=back_only_keyboard("bank:back"),
                 parse_mode="HTML"
             )
         else:
-            await message.answer(f"❌ {result['reason']}")
+            await message.answer(
+                f"❌ {result['reason']}",
+                reply_markup=back_only_keyboard("bank:back")
+            )
 
     await state.clear()
 
@@ -187,4 +224,8 @@ async def bank_status(callback: CallbackQuery):
             text += "✅ Faol qarzlar yo'q."
 
     await callback.answer()
-    await callback.message.answer(text, parse_mode="HTML")
+    await callback.message.edit_text(
+        text,
+        reply_markup=back_only_keyboard("bank:back"),
+        parse_mode="HTML"
+    )
