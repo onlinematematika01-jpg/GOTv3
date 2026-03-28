@@ -14,7 +14,7 @@ from database.models import User, MarketPrice
 router = Router()
 
 # Admin ID lar — .env dan to'ldiring
-ADMIN_IDS: list[int] = []
+ADMIN_IDS: list[int] = settings.ADMIN_IDS
 
 
 def is_admin(user_id: int) -> bool:
