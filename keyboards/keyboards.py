@@ -3,16 +3,19 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from database.models import RoleEnum
 
 
+def back_button(callback_data: str = "back:main") -> list:
+    """Orqaga tugma — inline keyboard uchun"""
+    return [InlineKeyboardButton(text="🔙 Orqaga", callback_data=callback_data)]
+
+
 def main_menu_keyboard(role: RoleEnum) -> ReplyKeyboardMarkup:
     builder = ReplyKeyboardBuilder()
     builder.row(KeyboardButton(text="👤 Profil"), KeyboardButton(text="🏰 Xonadon"))
     builder.row(KeyboardButton(text="⚔️ Urush"), KeyboardButton(text="🛒 Bozor"))
     builder.row(KeyboardButton(text="🏦 Temir Bank"), KeyboardButton(text="📜 Xronika"))
     builder.row(KeyboardButton(text="💬 Ichki Chat"), KeyboardButton(text="🤝 Diplomatiya"))
-
     if role in [RoleEnum.ADMIN]:
         builder.row(KeyboardButton(text="🔧 Admin Panel"))
-
     return builder.as_markup(resize_keyboard=True)
 
 
@@ -86,13 +89,20 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def house_list_keyboard(houses: list, action_prefix: str) -> InlineKeyboardMarkup:
+def admin_keyboard_with_back() -> InlineKeyboardMarkup:
+    """Admin panel uchun orqaga tugmasiz (asosiy menyu Reply tugma)"""
+    return admin_keyboard()
+
+
+def house_list_keyboard(houses: list, action_prefix: str, back_to: str = None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for house in houses:
         builder.button(
             text=f"🏰 {house.name} ({house.region.value})",
             callback_data=f"{action_prefix}:{house.id}"
         )
+    if back_to:
+        builder.button(text="🔙 Orqaga", callback_data=back_to)
     builder.adjust(1)
     return builder.as_markup()
 
@@ -103,5 +113,22 @@ def quantity_keyboard(item: str, max_qty: int = 100) -> InlineKeyboardMarkup:
         if qty <= max_qty:
             builder.button(text=str(qty), callback_data=f"qty:{item}:{qty}")
     builder.button(text="✏️ Boshqa", callback_data=f"qty:{item}:custom")
+    builder.button(text="🔙 Orqaga", callback_data="market:back")
     builder.adjust(5)
     return builder.as_markup()
+
+
+# ── Orqaga tugmali keyboard yordamchi funksiyalar ──────────────────────────
+
+def with_back(markup: InlineKeyboardMarkup, back_to: str) -> InlineKeyboardMarkup:
+    """Mavjud inline keyboard ga orqaga tugma qo'shadi"""
+    buttons = markup.inline_keyboard
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data=back_to)])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def back_only_keyboard(back_to: str) -> InlineKeyboardMarkup:
+    """Faqat orqaga tugma"""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔙 Orqaga", callback_data=back_to)
+    ]])
