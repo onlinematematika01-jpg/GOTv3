@@ -6,7 +6,7 @@ from datetime import datetime
 from database.engine import AsyncSessionFactory
 from database.repositories import UserRepo, HouseRepo, AllianceRepo, ChronicleRepo
 from database.models import RoleEnum
-from keyboards import diplomacy_keyboard, house_list_keyboard
+from keyboards import diplomacy_keyboard, house_list_keyboard, back_only_keyboard
 from utils.chronicle import post_to_chronicle, format_chronicle
 from sqlalchemy import update
 from database.models import Alliance
@@ -38,6 +38,19 @@ async def diplomacy_menu(message: Message):
         )
 
 
+@router.callback_query(F.data == "diplo:back")
+async def diplo_back(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.answer()
+    await callback.message.edit_text(
+        "🤝 <b>DIPLOMATIYA MARKAZI</b>\n\n"
+        "Ittifoqlar urush vaqtida qo'llab-quvvatlashni kafolatlaydi.\n"
+        "⚠️ Hukmdor urush ochsa — uning barcha ittifoqlari avtomatik buziladi.",
+        reply_markup=diplomacy_keyboard(),
+        parse_mode="HTML"
+    )
+
+
 @router.callback_query(F.data == "diplo:alliance")
 async def start_alliance(callback: CallbackQuery, state: FSMContext):
     async with AsyncSessionFactory() as session:
@@ -56,9 +69,9 @@ async def start_alliance(callback: CallbackQuery, state: FSMContext):
         await state.update_data(my_house_id=user.house_id)
 
         await callback.answer()
-        await callback.message.answer(
+        await callback.message.edit_text(
             "🤝 <b>Ittifoq tuzmoqchi bo'lgan xonadonni tanlang:</b>",
-            reply_markup=house_list_keyboard(others, "diplo:ally"),
+            reply_markup=house_list_keyboard(others, "diplo:ally", back_to="diplo:back"),
             parse_mode="HTML"
         )
 
@@ -83,19 +96,17 @@ async def confirm_alliance(callback: CallbackQuery, state: FSMContext):
         my_house = await house_repo.get_by_id(my_house_id)
         target_house = await house_repo.get_by_id(target_id)
 
-        alliance = await alliance_repo.create(my_house_id, target_id)
+        await alliance_repo.create(my_house_id, target_id)
 
-        # Xronika
         text = format_chronicle("alliance", house1=my_house.name, house2=target_house.name)
         tg_id = await post_to_chronicle(callback.bot, text)
         await chronicle_repo.add("alliance", text, house_id=my_house_id, tg_msg_id=tg_id)
 
-        # Target lord ga xabar
         if target_house.lord_id:
             try:
                 await callback.bot.send_message(
                     target_house.lord_id,
-                    f"🤝 <b>ITTIFOQ TAKLIFI QABUL QILINDI!</b>\n"
+                    f"🤝 <b>ITTIFOQ TUZILDI!</b>\n"
                     f"<b>{my_house.name}</b> bilan ittifoq tuzildi.",
                     parse_mode="HTML"
                 )
@@ -104,8 +115,9 @@ async def confirm_alliance(callback: CallbackQuery, state: FSMContext):
 
     await state.clear()
     await callback.answer()
-    await callback.message.answer(
+    await callback.message.edit_text(
         f"✅ <b>{target_house.name}</b> bilan ittifoq tuzildi!",
+        reply_markup=back_only_keyboard("diplo:back"),
         parse_mode="HTML"
     )
 
@@ -133,7 +145,11 @@ async def list_alliances(callback: CallbackQuery):
             text += f"• {other.name} ({other.region.value})\n"
 
     await callback.answer()
-    await callback.message.answer(text, parse_mode="HTML")
+    await callback.message.edit_text(
+        text,
+        reply_markup=back_only_keyboard("diplo:back"),
+        parse_mode="HTML"
+    )
 
 
 @router.callback_query(F.data == "diplo:break")
@@ -153,7 +169,6 @@ async def break_alliance_start(callback: CallbackQuery, state: FSMContext):
             await callback.answer("Buzish uchun ittifoq yo'q.", show_alert=True)
             return
 
-        # Ittifoq xonadonlari ro'yxati
         houses = []
         for a in alliances:
             other_id = a.house2_id if a.house1_id == user.house_id else a.house1_id
@@ -165,9 +180,9 @@ async def break_alliance_start(callback: CallbackQuery, state: FSMContext):
         await state.update_data(my_house_id=user.house_id)
 
         await callback.answer()
-        await callback.message.answer(
+        await callback.message.edit_text(
             "❌ <b>Qaysi ittifoqni buzmoqchisiz?</b>",
-            reply_markup=house_list_keyboard(houses, "diplo:break_confirm"),
+            reply_markup=house_list_keyboard(houses, "diplo:break_confirm", back_to="diplo:back"),
             parse_mode="HTML"
         )
 
@@ -198,7 +213,8 @@ async def confirm_break(callback: CallbackQuery, state: FSMContext):
 
     await state.clear()
     await callback.answer()
-    await callback.message.answer(
+    await callback.message.edit_text(
         f"💔 <b>{target.name}</b> bilan ittifoq buzildi.",
+        reply_markup=back_only_keyboard("diplo:back"),
         parse_mode="HTML"
     )
