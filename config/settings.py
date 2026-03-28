@@ -1,11 +1,12 @@
 from pydantic_settings import BaseSettings
-from typing import Optional
+from typing import Optional, List
 
 
 class Settings(BaseSettings):
     BOT_TOKEN: str = "YOUR_BOT_TOKEN"
     DATABASE_URL: str = "postgresql+asyncpg://user:password@localhost:5432/got_bot"
-    CHRONICLE_CHANNEL_ID: Optional[int] = None  # Telegram kanal ID
+    CHRONICLE_CHANNEL_ID: Optional[int] = None
+    ADMIN_IDS: List[int] = []
 
     # O'yin sozlamalari
     WAR_START_HOUR: int = 19
@@ -33,7 +34,7 @@ class Settings(BaseSettings):
     MAX_HOUSE_MEMBERS: int = 10
 
     # Iron Bank
-    DEFAULT_INTEREST_RATE: float = 0.10  # 10%
+    DEFAULT_INTEREST_RATE: float = 0.10
 
     class Config:
         env_file = ".env"
