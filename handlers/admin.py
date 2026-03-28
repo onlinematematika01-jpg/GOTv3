@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from database.engine import AsyncSessionFactory
 from database.repositories import UserRepo, HouseRepo, MarketRepo
 from database.models import RoleEnum, RegionEnum, House
-from keyboards import admin_keyboard
+from keyboards import admin_keyboard, back_only_keyboard
 from config.settings import settings
 from sqlalchemy import select, update, delete, text
 from database.models import User, MarketPrice, IronBankLoan, Alliance, War, Chronicle, InternalMessage
@@ -65,6 +65,27 @@ async def admin_panel(message: Message):
 
 
 # ─── NARXLAR ───────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "admin:back")
+async def admin_back(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    async with AsyncSessionFactory() as session:
+        from database.repositories import HouseRepo
+        house_repo = HouseRepo(session)
+        from sqlalchemy import select
+        total_users = await session.execute(select(User))
+        user_count = len(total_users.scalars().all())
+        all_houses = await house_repo.get_all()
+    text = (
+        "🔧 <b>ADMIN PANEL — Uch Ko'zli Qarg'a</b>\n\n"
+        f"👥 Jami foydalanuvchilar: {user_count}\n"
+        f"🏰 Jami xonadonlar: {len(all_houses)}\n"
+    )
+    await callback.answer()
+    await callback.message.edit_text(text, reply_markup=admin_keyboard(), parse_mode="HTML")
+
 @router.callback_query(F.data == "admin:prices")
 async def admin_prices_menu(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
@@ -320,7 +341,7 @@ async def admin_houses(callback: CallbackQuery):
             )
 
     await callback.answer()
-    await callback.message.answer(text, parse_mode="HTML")
+    await callback.message.answer(text, reply_markup=back_only_keyboard("admin:back"), parse_mode="HTML")
 
 
 # ─── YANGI XONADON QO'SHISH ────────────────────────────────────────────────
