@@ -25,7 +25,6 @@ class WarState(StatesGroup):
 
 def is_war_time() -> bool:
     now = datetime.utcnow()
-    # UTC+5 uchun +5 soat (O'zbekiston vaqti)
     local_hour = (now.hour + 5) % 24
     return settings.WAR_START_HOUR <= local_hour < settings.WAR_END_HOUR
 
@@ -138,7 +137,6 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
             await state.clear()
             return
 
-        # Ittifoqni tekshirish
         existing_alliance = await alliance_repo.get_active(attacker_house_id, target_house_id)
         if existing_alliance:
             await callback.answer("❌ Ittifoqchingizga urush e'lon qila olmaysiz!", show_alert=True)
@@ -148,12 +146,10 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
         grace_ends = datetime.utcnow() + timedelta(minutes=settings.GRACE_PERIOD_MINUTES)
         war = await war_repo.create_war(attacker_house_id, target_house_id, grace_ends)
 
-        # Geopolitika: Hukmdor urush ochsa, ittifoqlar buziladi
         user = await user_repo.get_by_id(callback.from_user.id)
         if user and user.role == RoleEnum.HIGH_LORD:
             await alliance_repo.break_alliances_for_war(attacker_house_id)
 
-        # Xronika
         text = format_chronicle(
             "war_declared",
             attacker=attacker.name,
@@ -165,7 +161,6 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
         await chronicle_repo.add("war_declared", text,
                                   house_id=attacker_house_id, tg_msg_id=tg_id)
 
-        # Mudofaachiga xabar
         if defender.lord_id:
             try:
                 await bot.send_message(
@@ -222,14 +217,12 @@ async def do_surrender(callback: CallbackQuery):
         defender = await house_repo.get_by_id(war.defender_house_id)
         attacker = await house_repo.get_by_id(war.attacker_house_id)
 
-        # O'lja hisoblash
         loot = calculate_surrender_loot(
             defender.treasury,
             defender.total_soldiers,
             defender.total_dragons,
         )
 
-        # Resurslar o'tkazish
         await house_repo.update_treasury(attacker.id, loot["gold"])
         await house_repo.update_treasury(defender.id, -loot["gold"])
         await session.execute(
@@ -245,11 +238,9 @@ async def do_surrender(callback: CallbackQuery):
             )
         )
 
-        # Doimiy soliq o'rnatish
         await house_repo.set_occupation(defender.id, attacker.id, tax_rate=0.10)
         await war_repo.end_war(war_id, attacker.id, loot["gold"], surrendered=True)
 
-        # Xronika
         text = format_chronicle(
             "surrender",
             loser=defender.name,
@@ -259,7 +250,6 @@ async def do_surrender(callback: CallbackQuery):
         tg_id = await post_to_chronicle(callback.bot, text)
         await chronicle_repo.add("surrender", text, house_id=defender.id, tg_msg_id=tg_id)
 
-        # Hujumchiga xabar
         if attacker.lord_id:
             try:
                 await callback.bot.send_message(
@@ -303,6 +293,83 @@ async def do_fight(callback: CallbackQuery):
             "Qo'shinlaringizni tayyorlang! 🗡️🐉",
             parse_mode="HTML"
         )
+
+
+@router.callback_query(F.data == "war:surrender")
+async def war_surrender_button(callback: CallbackQuery):
+    """war_menu dagi '🏳️ Taslim Bo'lish' tugmasi"""
+    async with AsyncSessionFactory() as session:
+        user_repo = UserRepo(session)
+        war_repo = WarRepo(session)
+        user = await user_repo.get_by_id(callback.from_user.id)
+
+        if not user or not user.house_id:
+            await callback.answer("❌ Xonadoningiz yo'q.", show_alert=True)
+            return
+
+        if user.role not in [RoleEnum.LORD, RoleEnum.HIGH_LORD, RoleEnum.ADMIN]:
+            await callback.answer("❌ Faqat Lord qaror qabul qila oladi.", show_alert=True)
+            return
+
+        active_war = await war_repo.get_active_war(user.house_id)
+        if not active_war:
+            await callback.answer("❌ Faol urush yo'q.", show_alert=True)
+            return
+
+        if active_war.defender_house_id != user.house_id:
+            await callback.answer(
+                "❌ Faqat mudofaachi taslim bo'la oladi.", show_alert=True
+            )
+            return
+
+        await callback.answer()
+        await callback.message.answer(
+            "⚠️ <b>Taslim bo'lishni tasdiqlaysizmi?</b>\n\n"
+            "Taslim bo'lsangiz resurslaringizning bir qismi yo'qoladi "
+            "va 10% doimiy soliq belgilanadi.\n\n"
+            "Tasdiqlash uchun quyidagi tugmani bosing:",
+            reply_markup=surrender_or_fight_keyboard(active_war.id),
+            parse_mode="HTML"
+        )
+
+
+@router.callback_query(F.data == "war:fight")
+async def war_fight_button(callback: CallbackQuery):
+    """war_menu dagi '🗡️ Jangga Kirish' tugmasi"""
+    async with AsyncSessionFactory() as session:
+        user_repo = UserRepo(session)
+        war_repo = WarRepo(session)
+        user = await user_repo.get_by_id(callback.from_user.id)
+
+        if not user or not user.house_id:
+            await callback.answer("❌ Xonadoningiz yo'q.", show_alert=True)
+            return
+
+        active_war = await war_repo.get_active_war(user.house_id)
+        if not active_war:
+            await callback.answer("❌ Faol urush yo'q.", show_alert=True)
+            return
+
+        if (
+            active_war.defender_house_id == user.house_id
+            and user.role in [RoleEnum.LORD, RoleEnum.HIGH_LORD, RoleEnum.ADMIN]
+        ):
+            await callback.answer()
+            await callback.message.answer(
+                "⚔️ <b>Jangga kirishni tasdiqlaysizmi?</b>\n\n"
+                "Urush 23:00 gacha davom etadi va natijalar avtomatik hisoblanadi.\n"
+                "Taslim bo'lish yoki jangda davom etish — qaror sizniki:",
+                reply_markup=surrender_or_fight_keyboard(active_war.id),
+                parse_mode="HTML"
+            )
+        else:
+            await callback.answer()
+            await callback.message.answer(
+                "⚔️ <b>Jang davom etmoqda!</b>\n\n"
+                "Urush 23:00 gacha davom etadi va natijalar avtomatik hisoblanadi.\n"
+                "Qo'shinlaringizni tayyorlang! 🗡️🐉",
+                parse_mode="HTML"
+            )
 
 
 @router.callback_query(F.data == "war:status")
@@ -365,7 +432,6 @@ async def request_betrayal(message: Message, state: FSMContext):
             await message.answer("❌ Hozirda faol urush yo'q. Xiyonat faqat urush paytida mumkin.")
             return
 
-        # Dushmanga o'tish
         enemy_house_id = (
             war.attacker_house_id
             if war.defender_house_id == user.house_id
@@ -373,7 +439,6 @@ async def request_betrayal(message: Message, state: FSMContext):
         )
         enemy_house = await house_repo.get_by_id(enemy_house_id)
 
-        # A'zo sonini tekshirish
         enemy_count = await user_repo.count_house_members(enemy_house_id)
         if enemy_count >= settings.MAX_HOUSE_MEMBERS:
             await message.answer("❌ Dushman xonadonida joy yo'q.")
@@ -387,7 +452,6 @@ async def request_betrayal(message: Message, state: FSMContext):
         user.role = RoleEnum.MEMBER
         await session.commit()
 
-        # Xronika
         text = format_chronicle(
             "betrayal",
             user=user.full_name,
@@ -396,7 +460,6 @@ async def request_betrayal(message: Message, state: FSMContext):
         tg_id = await post_to_chronicle(message.bot, text)
         await chronicle_repo.add("betrayal", text, user_id=user.id, house_id=enemy_house_id, tg_msg_id=tg_id)
 
-        # Lordga xabar
         if old_house and old_house.lord_id:
             try:
                 await message.bot.send_message(
