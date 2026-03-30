@@ -6,7 +6,7 @@ from datetime import datetime
 from database.engine import AsyncSessionFactory
 from database.repositories import UserRepo, HouseRepo, AllianceRepo, ChronicleRepo
 from database.models import RoleEnum
-from keyboards import diplomacy_keyboard, house_list_keyboard, back_only_keyboard
+from keyboards import diplomacy_keyboard, house_list_keyboard, back_only_keyboard, alliance_request_keyboard
 from utils.chronicle import post_to_chronicle, format_chronicle
 from sqlalchemy import update
 from database.models import Alliance
@@ -85,7 +85,6 @@ async def confirm_alliance(callback: CallbackQuery, state: FSMContext):
     async with AsyncSessionFactory() as session:
         alliance_repo = AllianceRepo(session)
         house_repo = HouseRepo(session)
-        chronicle_repo = ChronicleRepo(session)
 
         existing = await alliance_repo.get_active(my_house_id, target_id)
         if existing:
@@ -96,28 +95,110 @@ async def confirm_alliance(callback: CallbackQuery, state: FSMContext):
         my_house = await house_repo.get_by_id(my_house_id)
         target_house = await house_repo.get_by_id(target_id)
 
-        await alliance_repo.create(my_house_id, target_id)
-
-        text = format_chronicle("alliance", house1=my_house.name, house2=target_house.name)
-        tg_id = await post_to_chronicle(callback.bot, text)
-        await chronicle_repo.add("alliance", text, house_id=my_house_id, tg_msg_id=tg_id)
-
         if target_house.lord_id:
             try:
                 await callback.bot.send_message(
                     target_house.lord_id,
-                    f"🤝 <b>ITTIFOQ TUZILDI!</b>\n"
-                    f"<b>{my_house.name}</b> bilan ittifoq tuzildi.",
+                    f"🤝 <b>ITTIFOQ TAKLIFI!</b>\n\n"
+                    f"<b>{my_house.name}</b> xonadoni sizga ittifoq tuzishni taklif qilmoqda.\n\n"
+                    f"Qabul qilasizmi?",
+                    reply_markup=alliance_request_keyboard(my_house_id, target_id),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                await callback.answer(
+                    "❌ Nishon xonadonning lordiga xabar yuborib bo'lmadi.",
+                    show_alert=True
+                )
+                await state.clear()
+                return
+        else:
+            await callback.answer(
+                "❌ Nishon xonadonning lordi topilmadi.",
+                show_alert=True
+            )
+            await state.clear()
+            return
+
+    await state.clear()
+    await callback.answer()
+    await callback.message.edit_text(
+        f"📨 <b>{target_house.name}</b> xonadoniga ittifoq taklifi yuborildi.\n"
+        f"Ular qabul yoki rad etishini kutib turing.",
+        reply_markup=back_only_keyboard("diplo:back"),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("diplo:accept:"))
+async def accept_alliance(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    from_house_id = int(parts[2])
+    to_house_id = int(parts[3])
+
+    async with AsyncSessionFactory() as session:
+        alliance_repo = AllianceRepo(session)
+        house_repo = HouseRepo(session)
+        chronicle_repo = ChronicleRepo(session)
+
+        existing = await alliance_repo.get_active(from_house_id, to_house_id)
+        if existing:
+            await callback.answer("❌ Bu ittifoq allaqachon tuzilgan!", show_alert=True)
+            return
+
+        from_house = await house_repo.get_by_id(from_house_id)
+        to_house = await house_repo.get_by_id(to_house_id)
+
+        await alliance_repo.create(from_house_id, to_house_id)
+
+        text = format_chronicle("alliance", house1=from_house.name, house2=to_house.name)
+        tg_id = await post_to_chronicle(callback.bot, text)
+        await chronicle_repo.add("alliance", text, house_id=from_house_id, tg_msg_id=tg_id)
+
+        if from_house.lord_id:
+            try:
+                await callback.bot.send_message(
+                    from_house.lord_id,
+                    f"✅ <b>ITTIFOQ TUZILDI!</b>\n\n"
+                    f"<b>{to_house.name}</b> xonadoni ittifoq taklifingizni qabul qildi!",
                     parse_mode="HTML"
                 )
             except Exception:
                 pass
 
-    await state.clear()
     await callback.answer()
     await callback.message.edit_text(
-        f"✅ <b>{target_house.name}</b> bilan ittifoq tuzildi!",
-        reply_markup=back_only_keyboard("diplo:back"),
+        f"✅ <b>ITTIFOQ TUZILDI!</b>\n\n"
+        f"<b>{from_house.name}</b> bilan ittifoq muvaffaqiyatli tuzildi!",
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("diplo:reject:"))
+async def reject_alliance(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    from_house_id = int(parts[2])
+    to_house_id = int(parts[3])
+
+    async with AsyncSessionFactory() as session:
+        house_repo = HouseRepo(session)
+        from_house = await house_repo.get_by_id(from_house_id)
+        to_house = await house_repo.get_by_id(to_house_id)
+
+        if from_house.lord_id:
+            try:
+                await callback.bot.send_message(
+                    from_house.lord_id,
+                    f"❌ <b>ITTIFOQ RAD ETILDI!</b>\n\n"
+                    f"<b>{to_house.name}</b> xonadoni ittifoq taklifingizni rad etdi.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+    await callback.answer()
+    await callback.message.edit_text(
+        f"❌ <b>{from_house.name}</b> xonadonining ittifoq taklifi rad etildi.",
         parse_mode="HTML"
     )
 
