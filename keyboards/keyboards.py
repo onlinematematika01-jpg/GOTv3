@@ -14,11 +14,23 @@ def main_menu_keyboard(role: RoleEnum) -> ReplyKeyboardMarkup:
     builder.row(KeyboardButton(text="⚔️ Urush"), KeyboardButton(text="🛒 Bozor"))
     builder.row(KeyboardButton(text="🏦 Temir Bank"), KeyboardButton(text="📜 Xronika"))
     builder.row(KeyboardButton(text="💬 Ichki Chat"), KeyboardButton(text="🤝 Diplomatiya"))
+    builder.row(KeyboardButton(text="🏆 Reyting"))
     if role in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
         builder.row(KeyboardButton(text="👑 Hukmdorlik Da'vosi"))
     if role in [RoleEnum.ADMIN]:
         builder.row(KeyboardButton(text="🔧 Admin Panel"))
     return builder.as_markup(resize_keyboard=True)
+
+
+def rating_menu_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⚡ Umumiy Kuch", callback_data="rating:power")
+    builder.button(text="🗡️ Askarlar", callback_data="rating:soldiers")
+    builder.button(text="💰 Oltin", callback_data="rating:gold")
+    builder.button(text="🐉 Jangchilar", callback_data="rating:dragons")
+    builder.button(text="🏆 Jangda Yutgani", callback_data="rating:wins")
+    builder.adjust(2, 2, 1)
+    return builder.as_markup()
 
 
 def war_menu_keyboard(is_lord: bool, has_active_war: bool) -> InlineKeyboardMarkup:
