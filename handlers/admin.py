@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo, MarketRepo
+from database.repositories import UserRepo, HouseRepo, MarketRepo, BotSettingsRepo
 from database.models import RoleEnum, RegionEnum, House
 from keyboards import admin_keyboard, back_only_keyboard
 from config.settings import settings
@@ -151,10 +151,14 @@ async def admin_interest(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
         return
 
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        current_rate = await cfg.get_float("interest_rate")
+
     await state.set_state(AdminState.waiting_interest)
     await callback.answer()
     await callback.message.answer(
-        f"🏦 Joriy foiz: {settings.DEFAULT_INTEREST_RATE * 100:.0f}%\n"
+        f"🏦 Joriy foiz: {current_rate * 100:.0f}%\n"
         f"Yangi foizni kiriting (masalan: 15 → 15%):"
     )
 
@@ -171,11 +175,10 @@ async def admin_set_interest(message: Message, state: FSMContext):
         await message.answer("❌ 0 dan 100 gacha raqam kiriting.")
         return
 
-    import handlers.bank as bank_module
-    bank_module.CURRENT_INTEREST_RATE = rate / 100
-    settings.DEFAULT_INTEREST_RATE = rate / 100
+    async with AsyncSessionFactory() as session:
+        await BotSettingsRepo(session).set("interest_rate", str(rate / 100))
 
-    await message.answer(f"✅ Foiz stavkasi {rate:.0f}% ga o'zgartirildi!")
+    await message.answer(f"✅ Foiz stavkasi {rate:.0f}% ga o'zgartirildi va bazaga saqlandi!")
     await state.clear()
 
 
@@ -186,13 +189,17 @@ async def admin_bank_limits(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
         return
 
-    import handlers.admin as self_module
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        cur_min = await cfg.get_int("bank_min_loan")
+        cur_max = await cfg.get_int("bank_max_loan")
+
     await state.set_state(AdminState.waiting_bank_min)
     await callback.answer()
     await callback.message.answer(
         f"🏦 <b>Bank qarz limiti sozlash</b>\n\n"
-        f"Joriy minimal qarz: {BANK_MIN_LOAN:,} tanga\n"
-        f"Joriy maksimal qarz: {BANK_MAX_LOAN:,} tanga\n\n"
+        f"Joriy minimal qarz: {cur_min:,} tanga\n"
+        f"Joriy maksimal qarz: {cur_max:,} tanga\n\n"
         f"Yangi MINIMAL miqdorni kiriting:",
         parse_mode="HTML"
     )
@@ -209,11 +216,6 @@ async def admin_set_bank_min(message: Message, state: FSMContext):
     except ValueError:
         await message.answer("❌ Musbat raqam kiriting.")
         return
-
-    import handlers.bank as bank_module
-    global BANK_MIN_LOAN
-    BANK_MIN_LOAN = val
-    bank_module.BANK_MIN_LOAN = val
 
     await state.update_data(bank_min=val)
     await state.set_state(AdminState.waiting_bank_max)
@@ -234,13 +236,13 @@ async def admin_set_bank_max(message: Message, state: FSMContext):
         await message.answer("❌ Musbat raqam kiriting.")
         return
 
-    import handlers.bank as bank_module
-    global BANK_MAX_LOAN
-    BANK_MAX_LOAN = val
-    bank_module.BANK_MAX_LOAN = val
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        await cfg.set("bank_min_loan", str(data["bank_min"]))
+        await cfg.set("bank_max_loan", str(val))
 
     await message.answer(
-        f"✅ <b>Bank limiti yangilandi!</b>\n\n"
+        f"✅ <b>Bank limiti bazaga saqlandi!</b>\n\n"
         f"Minimal: {data['bank_min']:,} tanga\n"
         f"Maksimal: {val:,} tanga",
         parse_mode="HTML"
