@@ -345,3 +345,41 @@ class MarketRepo:
         result = await self.session.execute(select(MarketPrice))
         items = result.scalars().all()
         return {item.item_type: item.price for item in items}
+
+
+class BotSettingsRepo:
+    """Admin sozlamalari — DB da saqlanadi, deploy da yo'qolmaydi"""
+
+    DEFAULTS = {
+        "interest_rate": "0.10",
+        "bank_min_loan": "100",
+        "bank_max_loan": "100000",
+    }
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get(self, key: str) -> str:
+        from database.models import BotSettings
+        result = await self.session.execute(
+            select(BotSettings).where(BotSettings.key == key)
+        )
+        row = result.scalar_one_or_none()
+        if row:
+            return row.value
+        return self.DEFAULTS.get(key, "")
+
+    async def set(self, key: str, value: str):
+        from database.models import BotSettings
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        # UPSERT
+        stmt = pg_insert(BotSettings).values(key=key, value=value)
+        stmt = stmt.on_conflict_do_update(index_elements=["key"], set_={"value": value})
+        await self.session.execute(stmt)
+        await self.session.commit()
+
+    async def get_float(self, key: str) -> float:
+        return float(await self.get(key))
+
+    async def get_int(self, key: str) -> int:
+        return int(await self.get(key))
