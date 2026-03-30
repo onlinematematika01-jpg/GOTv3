@@ -32,13 +32,14 @@ async def create_tables():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _migrate_drop_region_unique(conn)
+        await _migrate_add_war_columns(conn)   # <-- YANGI QATOR
     logger.info("Database jadvallari yaratildi")
     await _seed_market_prices()
     await _seed_houses()
 
 
 async def _migrate_drop_region_unique(conn):
-    """houses.region dagi unique constraint ni olib tashlash (bir martalik auto migration)"""
+    """houses.region dagi unique constraint ni olib tashlash"""
     try:
         await conn.execute(text("""
             DO $$
@@ -57,6 +58,54 @@ async def _migrate_drop_region_unique(conn):
         logger.info("Migration: houses.region unique constraint tekshirildi")
     except Exception as e:
         logger.warning(f"Migration xatosi (muhim emas): {e}")
+
+
+async def _migrate_add_war_columns(conn):
+    """wars jadvaliga war_type va claim_id ustunlarini qo'shish"""
+    try:
+        # 1. wartypeenum PostgreSQL type yaratish
+        await conn.execute(text("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_type WHERE typname = 'wartypeenum'
+                ) THEN
+                    CREATE TYPE wartypeenum AS ENUM ('external', 'civil');
+                END IF;
+            END $$;
+        """))
+
+        # 2. war_type ustuni qo'shish
+        await conn.execute(text("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'wars' AND column_name = 'war_type'
+                ) THEN
+                    ALTER TABLE wars
+                    ADD COLUMN war_type wartypeenum NOT NULL DEFAULT 'external';
+                END IF;
+            END $$;
+        """))
+
+        # 3. claim_id ustuni qo'shish
+        await conn.execute(text("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'wars' AND column_name = 'claim_id'
+                ) THEN
+                    ALTER TABLE wars
+                    ADD COLUMN claim_id INTEGER REFERENCES hukmdor_claims(id) ON DELETE SET NULL;
+                END IF;
+            END $$;
+        """))
+
+        logger.info("Migration: wars jadvaliga war_type va claim_id qo'shildi")
+    except Exception as e:
+        logger.warning(f"Migration xatosi (war_columns): {e}")
 
 
 async def _seed_market_prices():
