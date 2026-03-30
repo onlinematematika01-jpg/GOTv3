@@ -147,3 +147,19 @@ def back_only_keyboard(back_to: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="🔙 Orqaga", callback_data=back_to)
     ]])
+
+
+def alliance_request_keyboard(from_house_id: int, to_house_id: int) -> InlineKeyboardMarkup:
+    """Ittifoq taklifini qabul qilish yoki rad etish tugmalari"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="✅ Qabul qilish",
+                callback_data=f"diplo:accept:{from_house_id}:{to_house_id}"
+            ),
+            InlineKeyboardButton(
+                text="❌ Rad etish",
+                callback_data=f"diplo:reject:{from_house_id}:{to_house_id}"
+            ),
+        ]
+    ])
