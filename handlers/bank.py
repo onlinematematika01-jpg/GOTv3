@@ -12,11 +12,9 @@ from sqlalchemy import select
 
 router = Router()
 
-
 class BankState(StatesGroup):
     waiting_loan_amount = State()
     waiting_repay_amount = State()
-
 
 async def _get_bank_settings() -> dict:
     async with AsyncSessionFactory() as session:
@@ -27,7 +25,6 @@ async def _get_bank_settings() -> dict:
             "max_loan": await repo.get_int("bank_max_loan"),
         }
 
-
 def _bank_text(treasury: int, debt: int, cfg: dict) -> str:
     return (
         "🏦 <b>TEMIR BANK</b>\n\n"
@@ -37,7 +34,6 @@ def _bank_text(treasury: int, debt: int, cfg: dict) -> str:
         f"📊 Qarz limiti: {cfg['min_loan']:,} — {cfg['max_loan']:,} tanga\n\n"
         "⚠️ Qarz to'lanmasa — barcha qo'shin va ajdarlar musodara qilinadi!"
     )
-
 
 @router.message(F.text == "🏦 Temir Bank")
 async def iron_bank_menu(message: Message):
@@ -59,7 +55,6 @@ async def iron_bank_menu(message: Message):
             parse_mode="HTML"
         )
 
-
 @router.callback_query(F.data == "bank:back")
 async def bank_back(callback: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -71,18 +66,16 @@ async def bank_back(callback: CallbackQuery, state: FSMContext):
         if user and user.house_id:
             house = await house_repo.get_by_id(user.house_id)
             treasury = house.treasury if house else 0
-    cfg = await _get_bank_settings()
-    await callback.answer()
-    await callback.message.edit_text(
-        _bank_text(treasury, user.debt if user else 0, cfg),
-        reply_markup=iron_bank_keyboard(),
-        parse_mode="HTML"
-    )
-
+        cfg = await _get_bank_settings()
+        await callback.answer()
+        await callback.message.edit_text(
+            _bank_text(treasury, user.debt if user else 0, cfg),
+            reply_markup=iron_bank_keyboard(),
+            parse_mode="HTML"
+        )
 
 @router.callback_query(F.data == "bank:loan")
 async def request_loan(callback: CallbackQuery, state: FSMContext):
-    # Faqat Lord qarz ola oladi
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
         user = await user_repo.get_by_id(callback.from_user.id)
@@ -90,6 +83,17 @@ async def request_loan(callback: CallbackQuery, state: FSMContext):
         if not user or user.role not in [RoleEnum.LORD, RoleEnum.HIGH_LORD, RoleEnum.ADMIN]:
             await callback.answer("❌ Faqat xonadon lordi qarz ola oladi.", show_alert=True)
             return
+
+        # Avvalgi qarz to'liq to'lanmaguncha yangi qarz bermaslik
+        if user.debt > 0:
+            await callback.answer(
+                f"❌ Avvalgi qarzingiz hali to'lanmagan!\n"
+                f"Qolgan qarz: {user.debt:,} tanga\n\n"
+                f"Yangi qarz olish uchun avval mavjud qarzni to'lang.",
+                show_alert=True
+            )
+            return
+
     cfg = await _get_bank_settings()
     await state.set_state(BankState.waiting_loan_amount)
     await callback.answer()
@@ -101,7 +105,6 @@ async def request_loan(callback: CallbackQuery, state: FSMContext):
         f"Bekor qilish uchun /cancel yozing.",
         parse_mode="HTML"
     )
-
 
 @router.message(BankState.waiting_loan_amount)
 async def process_loan(message: Message, state: FSMContext):
@@ -137,6 +140,7 @@ async def process_loan(message: Message, state: FSMContext):
             await state.clear()
             return
 
+        # Qo'shimcha xavfsizlik tekshiruvi
         if user.debt > 0:
             await message.answer(
                 f"❌ Avvalgi qarzingizni to'lang!\nQarz: {user.debt:,} tanga",
@@ -164,7 +168,6 @@ async def process_loan(message: Message, state: FSMContext):
 
     await state.clear()
 
-
 @router.callback_query(F.data == "bank:repay")
 async def request_repay(callback: CallbackQuery, state: FSMContext):
     async with AsyncSessionFactory() as session:
@@ -188,7 +191,6 @@ async def request_repay(callback: CallbackQuery, state: FSMContext):
         f"Bekor qilish uchun /cancel yozing.",
         parse_mode="HTML"
     )
-
 
 @router.message(BankState.waiting_repay_amount)
 async def process_repay(message: Message, state: FSMContext):
@@ -242,7 +244,6 @@ async def process_repay(message: Message, state: FSMContext):
 
     await state.clear()
 
-
 @router.callback_query(F.data == "bank:status")
 async def bank_status(callback: CallbackQuery):
     async with AsyncSessionFactory() as session:
@@ -279,9 +280,9 @@ async def bank_status(callback: CallbackQuery):
         else:
             text += "✅ Faol qarzlar yo'q."
 
-    await callback.answer()
-    await callback.message.edit_text(
-        text,
-        reply_markup=back_only_keyboard("bank:back"),
-        parse_mode="HTML"
-    )
+        await callback.answer()
+        await callback.message.edit_text(
+            text,
+            reply_markup=back_only_keyboard("bank:back"),
+            parse_mode="HTML"
+        )
