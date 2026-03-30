@@ -204,10 +204,15 @@ class WarRepo:
         await self.session.commit()
 
     async def get_all_active(self) -> List[War]:
+        from database.models import WarAllySupport
         result = await self.session.execute(
             select(War).where(
                 War.status.in_([WarStatusEnum.GRACE_PERIOD, WarStatusEnum.FIGHTING])
-            ).options(selectinload(War.attacker), selectinload(War.defender))
+            ).options(
+                selectinload(War.attacker),
+                selectinload(War.defender),
+                selectinload(War.winner),
+            )
         )
         return result.scalars().all()
 
