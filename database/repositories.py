@@ -130,6 +130,12 @@ class HouseRepo:
         result = await self.session.execute(select(House))
         return result.scalars().all()
 
+    async def get_all_by_region(self, region) -> List[House]:
+        result = await self.session.execute(
+            select(House).where(House.region == region)
+        )
+        return result.scalars().all()
+
     async def update_treasury(self, house_id: int, amount: int):
         await self.session.execute(
             update(House).where(House.id == house_id)
@@ -383,3 +389,129 @@ class BotSettingsRepo:
 
     async def get_int(self, key: str) -> int:
         return int(await self.get(key))
+
+
+class HukmdorClaimRepo:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_active_claim(self, region) -> "Optional[HukmdorClaim]":
+        from database.models import HukmdorClaim, ClaimStatusEnum
+        result = await self.session.execute(
+            select(HukmdorClaim).where(
+                HukmdorClaim.region == region,
+                HukmdorClaim.status.in_([ClaimStatusEnum.PENDING, ClaimStatusEnum.IN_PROGRESS])
+            )
+        )
+        return result.scalars().first()
+
+    async def create_claim(self, claimant_house_id: int, region) -> "HukmdorClaim":
+        from database.models import HukmdorClaim, HukmdorClaimResponse, ClaimStatusEnum
+        claim = HukmdorClaim(
+            claimant_house_id=claimant_house_id,
+            region=region,
+            status=ClaimStatusEnum.PENDING,
+        )
+        self.session.add(claim)
+        await self.session.flush()  # id olish uchun
+        return claim
+
+    async def add_response(self, claim_id: int, house_id: int) -> "HukmdorClaimResponse":
+        from database.models import HukmdorClaimResponse
+        resp = HukmdorClaimResponse(claim_id=claim_id, house_id=house_id)
+        self.session.add(resp)
+        await self.session.commit()
+        return resp
+
+    async def get_response(self, claim_id: int, house_id: int) -> "Optional[HukmdorClaimResponse]":
+        from database.models import HukmdorClaimResponse
+        result = await self.session.execute(
+            select(HukmdorClaimResponse).where(
+                HukmdorClaimResponse.claim_id == claim_id,
+                HukmdorClaimResponse.house_id == house_id,
+            )
+        )
+        return result.scalars().first()
+
+    async def get_all_responses(self, claim_id: int) -> "List[HukmdorClaimResponse]":
+        from database.models import HukmdorClaimResponse
+        result = await self.session.execute(
+            select(HukmdorClaimResponse).where(HukmdorClaimResponse.claim_id == claim_id)
+        )
+        return result.scalars().all()
+
+    async def set_response(self, claim_id: int, house_id: int, accepted: bool):
+        from database.models import HukmdorClaimResponse
+        from datetime import datetime
+        await self.session.execute(
+            update(HukmdorClaimResponse).where(
+                HukmdorClaimResponse.claim_id == claim_id,
+                HukmdorClaimResponse.house_id == house_id,
+            ).values(accepted=accepted, responded_at=datetime.utcnow())
+        )
+        await self.session.commit()
+
+    async def set_status(self, claim_id: int, status):
+        from database.models import HukmdorClaim
+        from datetime import datetime
+        vals = {"status": status}
+        from database.models import ClaimStatusEnum
+        if status == ClaimStatusEnum.COMPLETED:
+            vals["resolved_at"] = datetime.utcnow()
+        await self.session.execute(
+            update(HukmdorClaim).where(HukmdorClaim.id == claim_id).values(**vals)
+        )
+        await self.session.commit()
+
+    async def resolve_hukmdor(self, region, winner_house_id: int, bot):
+        """G'olib xonadonini HIGH_LORD qilish, boshqalarni LORD ga tushirish"""
+        from database.models import House, User, RoleEnum
+        from sqlalchemy import select
+
+        # Hududdagi barcha xonadonlar
+        result = await self.session.execute(
+            select(House).where(House.region == region)
+        )
+        houses = result.scalars().all()
+
+        for house in houses:
+            if house.id == winner_house_id:
+                # G'olib xonadon — HIGH_LORD
+                house.high_lord_id = house.lord_id
+                if house.lord_id:
+                    await self.session.execute(
+                        update(User).where(User.id == house.lord_id)
+                        .values(role=RoleEnum.HIGH_LORD)
+                    )
+                    try:
+                        await bot.send_message(
+                            house.lord_id,
+                            f"👑 <b>TABRIKLAYMIZ!</b>\n\n"
+                            f"Siz <b>{house.region.value}</b> hududining "
+                            f"<b>HUKMDORI</b> bo'ldingiz!\n"
+                            f"Barcha vassal xonadonlar sizga o'lpon to'laydi.",
+                            parse_mode="HTML"
+                        )
+                    except Exception:
+                        pass
+            else:
+                # Mag'lub/vassal xonadonlar — HIGH_LORD ni o'chirish
+                house.high_lord_id = None
+                if house.lord_id:
+                    await self.session.execute(
+                        update(User).where(
+                            User.id == house.lord_id,
+                            User.role == RoleEnum.HIGH_LORD
+                        ).values(role=RoleEnum.LORD)
+                    )
+                    try:
+                        await bot.send_message(
+                            house.lord_id,
+                            f"🏰 Sizning xonadoningiz <b>{house.name}</b> "
+                            f"vassal maqomini oldi.",
+                            parse_mode="HTML"
+                        )
+                    except Exception:
+                        pass
+
+        await self.session.commit()
