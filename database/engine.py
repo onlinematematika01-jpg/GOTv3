@@ -31,9 +31,32 @@ AsyncSessionFactory = async_sessionmaker(
 async def create_tables():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _migrate_drop_region_unique(conn)
     logger.info("Database jadvallari yaratildi")
     await _seed_market_prices()
     await _seed_houses()
+
+
+async def _migrate_drop_region_unique(conn):
+    """houses.region dagi unique constraint ni olib tashlash (bir martalik auto migration)"""
+    try:
+        await conn.execute(text("""
+            DO $$
+            DECLARE c TEXT;
+            BEGIN
+                SELECT constraint_name INTO c
+                FROM information_schema.table_constraints
+                WHERE table_name = 'houses'
+                  AND constraint_type = 'UNIQUE'
+                  AND constraint_name LIKE '%region%';
+                IF c IS NOT NULL THEN
+                    EXECUTE 'ALTER TABLE houses DROP CONSTRAINT ' || c;
+                END IF;
+            END $$;
+        """))
+        logger.info("Migration: houses.region unique constraint tekshirildi")
+    except Exception as e:
+        logger.warning(f"Migration xatosi (muhim emas): {e}")
 
 
 async def _seed_market_prices():
@@ -69,7 +92,7 @@ async def _seed_houses():
                 House(name="Lannister xonadoni", region=RegionEnum.WESTERLANDS),
                 House(name="Baratheon xonadoni", region=RegionEnum.KINGS_LANDING),
                 House(name="Tyrell xonadoni", region=RegionEnum.REACH),
-                House(name="Baratheon Fırtınalı xonadoni", region=RegionEnum.STORMLANDS),
+                House(name="Baratheon Firtinali xonadoni", region=RegionEnum.STORMLANDS),
                 House(name="Martell xonadoni", region=RegionEnum.DORNE),
             ]
             session.add_all(houses)
