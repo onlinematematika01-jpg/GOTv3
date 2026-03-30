@@ -124,8 +124,11 @@ async def end_war_time_job(bot: Bot):
             from database.models import WarAllySupport
             from utils.battle import AllyContribution
             from sqlalchemy import select as sa_select
+            from sqlalchemy.orm import selectinload as sa_selectinload
             ally_result = await session.execute(
-                sa_select(WarAllySupport).where(WarAllySupport.war_id == war.id)
+                sa_select(WarAllySupport)
+                .where(WarAllySupport.war_id == war.id)
+                .options(sa_selectinload(WarAllySupport.ally_house))
             )
             ally_supports = ally_result.scalars().all()
 
