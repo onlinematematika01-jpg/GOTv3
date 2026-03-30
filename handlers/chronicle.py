@@ -4,9 +4,11 @@ from aiogram.filters import Command
 from database.engine import AsyncSessionFactory
 from database.models import Chronicle
 from sqlalchemy import select, desc
+from datetime import timezone, timedelta
 
 router = Router()
 
+TASHKENT = timedelta(hours=5)
 
 @router.message(F.text == "📜 Xronika")
 @router.message(Command("chronicle"))
@@ -25,7 +27,10 @@ async def show_chronicle(message: Message):
 
         text = "📜 <b>YETTI QIROLLIK XRONIKASI</b>\n\n"
         for r in records:
-            date_str = r.created_at.strftime("%d.%m %H:%M")
-            text += f"[{date_str}] {r.description[:120]}...\n\n" if len(r.description) > 120 else f"[{date_str}] {r.description}\n\n"
+            # UTC dan Toshkent vaqtiga o'tkazish (+5 soat)
+            tashkent_time = r.created_at.replace(tzinfo=timezone.utc) + TASHKENT
+            date_str = tashkent_time.strftime("%d.%m %H:%M")
+            desc = r.description[:120] + "..." if len(r.description) > 120 else r.description
+            text += f"[{date_str}] {desc}\n\n"
 
         await message.answer(text, parse_mode="HTML")
