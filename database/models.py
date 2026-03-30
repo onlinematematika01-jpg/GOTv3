@@ -162,6 +162,24 @@ class War(Base):
     winner = relationship("House", foreign_keys=[winner_house_id])
 
 
+class WarAllySupport(Base):
+    """Urushda ittifoqchi yordami"""
+    __tablename__ = "war_ally_supports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    war_id = Column(Integer, ForeignKey("wars.id"), nullable=False)
+    ally_house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
+    side = Column(String(16), nullable=False)      # "attacker" | "defender"
+    join_type = Column(String(16), nullable=False) # "full" | "soldiers"
+    soldiers = Column(Integer, default=0)
+    dragons = Column(Integer, default=0)
+    scorpions = Column(Integer, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+
+    war = relationship("War", foreign_keys=[war_id])
+    ally_house = relationship("House", foreign_keys=[ally_house_id])
+
+
 class IronBankLoan(Base):
     __tablename__ = "iron_bank_loans"
 
