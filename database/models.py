@@ -168,3 +168,12 @@ class MarketPrice(Base):
     item_type = Column(String(32), nullable=False, unique=True)  # soldier, dragon, scorpion
     price = Column(Integer, nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class BotSettings(Base):
+    """Admin tomonidan o'zgartiriluvchi sozlamalar — DB da saqlanadi, deploy da yo'qolmaydi"""
+    __tablename__ = "bot_settings"
+
+    key = Column(String(64), primary_key=True)
+    value = Column(String(256), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
