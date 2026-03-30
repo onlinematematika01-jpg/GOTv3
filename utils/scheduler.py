@@ -284,4 +284,102 @@ async def setup_scheduler(scheduler: AsyncIOScheduler, bot: Bot):
         replace_existing=True,
     )
 
+    # Civil urushlar tugashini tekshirish - har 10 daqiqada
+    scheduler.add_job(
+        check_civil_wars_job,
+        "interval",
+        minutes=10,
+        args=[bot],
+        id="civil_wars_check",
+        replace_existing=True,
+    )
+
+    # Da'vo muddati tugashini tekshirish (1 soat javob bermaganlar) - har 15 daqiqada
+    scheduler.add_job(
+        check_claim_timeouts_job,
+        "interval",
+        minutes=15,
+        args=[bot],
+        id="claim_timeout_check",
+        replace_existing=True,
+    )
+
     logger.info("Scheduler jobs o'rnatildi")
+
+
+async def check_civil_wars_job(bot: Bot):
+    """Civil urushlar tugashini tekshirib, Hukmdorni belgilash"""
+    from handlers.claim import check_claim_wars_ended
+    async with AsyncSessionFactory() as session:
+        await check_claim_wars_ended(bot, session)
+
+
+async def check_claim_timeouts_job(bot: Bot):
+    """1 soat ichida javob bermagan xonadonlarni rad etilgan deb belgilash va urush boshlash"""
+    from database.models import HukmdorClaim, HukmdorClaimResponse, ClaimStatusEnum, WarTypeEnum
+    from database.repositories import HukmdorClaimRepo, HouseRepo, WarRepo
+    from sqlalchemy import select
+    from datetime import datetime, timedelta
+
+    async with AsyncSessionFactory() as session:
+        claim_repo = HukmdorClaimRepo(session)
+        house_repo = HouseRepo(session)
+        war_repo = WarRepo(session)
+
+        # Faol PENDING da'volar
+        result = await session.execute(
+            select(HukmdorClaim).where(
+                HukmdorClaim.status == ClaimStatusEnum.PENDING,
+            )
+        )
+        claims = result.scalars().all()
+
+        now = datetime.utcnow()
+        local_hour = (now.hour + 5) % 24
+        war_possible = settings.WAR_START_HOUR <= local_hour < settings.WAR_DECLARE_DEADLINE
+
+        for claim in claims:
+            # 1 soatdan oshgan da'vo
+            if (now - claim.created_at).total_seconds() < 3600:
+                continue
+
+            responses = await claim_repo.get_all_responses(claim.id)
+            claimant = await house_repo.get_by_id(claim.claimant_house_id)
+
+            for resp in responses:
+                if resp.accepted is not None:
+                    continue
+
+                # Javob bermagan — rad etilgan deb hisoblanadi
+                await claim_repo.set_response(claim.id, resp.house_id, accepted=False)
+                defender = await house_repo.get_by_id(resp.house_id)
+
+                if defender and defender.lord_id:
+                    try:
+                        await bot.send_message(
+                            defender.lord_id,
+                            f"⏰ <b>Muddati o'tdi!</b>\n\n"
+                            f"<b>{claimant.name}</b> xonadonining hukmdorlik da'vosiga "
+                            f"javob bermaganligi sababli rad etildi.\n"
+                            f"{'⚔️ Urush boshlanmoqda!' if war_possible else '⚔️ Urush vaqtida boshlanadi.'}",
+                            parse_mode="HTML"
+                        )
+                    except Exception:
+                        pass
+
+                if war_possible:
+                    active = await war_repo.get_active_war(resp.house_id)
+                    if not active:
+                        grace_ends = now + timedelta(minutes=settings.GRACE_PERIOD_MINUTES)
+                        war = await war_repo.create_war(claimant.id, resp.house_id, grace_ends)
+                        from sqlalchemy import update
+                        from database.models import War
+                        await session.execute(
+                            update(War).where(War.id == war.id).values(
+                                war_type=WarTypeEnum.CIVIL,
+                                claim_id=claim.id,
+                            )
+                        )
+                        await session.commit()
+
+            await claim_repo.set_status(claim.id, ClaimStatusEnum.IN_PROGRESS)
