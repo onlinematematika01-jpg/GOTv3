@@ -23,10 +23,10 @@ class RegionEnum(str, enum.Enum):
 
 
 class RoleEnum(str, enum.Enum):
-    ADMIN = "admin"           # Uch ko'zli qarg'a
-    HIGH_LORD = "high_lord"  # Hukmdor Vassal (Oliy Lord)
-    LORD = "lord"             # Vassal Lordi
-    MEMBER = "member"         # A'zo
+    ADMIN = "admin"
+    HIGH_LORD = "high_lord"
+    LORD = "lord"
+    MEMBER = "member"
 
 
 class WarStatusEnum(str, enum.Enum):
@@ -36,10 +36,21 @@ class WarStatusEnum(str, enum.Enum):
     ENDED = "ended"
 
 
+class WarTypeEnum(str, enum.Enum):
+    EXTERNAL = "external"   # Boshqa hududga urush
+    CIVIL = "civil"         # Bir hududdagi xonadonlar o'rtasida Hukmdorlik uchun
+
+
+class ClaimStatusEnum(str, enum.Enum):
+    PENDING = "pending"       # Boshqa xonadonlar javob kutmoqda
+    IN_PROGRESS = "in_progress"  # Urushlar ketmoqda
+    COMPLETED = "completed"   # Hukmdor belgilandi
+
+
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(BigInteger, primary_key=True)  # Telegram user_id
+    id = Column(BigInteger, primary_key=True)
     username = Column(String(64), nullable=True)
     full_name = Column(String(128), nullable=False)
     role = Column(Enum(RoleEnum), default=RoleEnum.MEMBER, nullable=False)
@@ -54,7 +65,7 @@ class User(Base):
     referral_count_today = Column(Integer, default=0)
     last_farm_date = Column(DateTime, nullable=True)
     last_referral_reset = Column(DateTime, nullable=True)
-    debt = Column(BigInteger, default=0)  # Iron Bank qarzi
+    debt = Column(BigInteger, default=0)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
 
@@ -70,18 +81,46 @@ class House(Base):
     region = Column(Enum(RegionEnum), nullable=False)
     lord_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
     high_lord_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
-    treasury = Column(BigInteger, default=0)  # Xonadon xazinasi
+    treasury = Column(BigInteger, default=0)
     total_soldiers = Column(Integer, default=0)
     total_dragons = Column(Integer, default=0)
     total_scorpions = Column(Integer, default=0)
     is_under_occupation = Column(Boolean, default=False)
     occupier_house_id = Column(Integer, ForeignKey("houses.id"), nullable=True)
-    permanent_tax_rate = Column(Float, default=0.0)  # Taslim bo'lgandan keyingi soliq
+    permanent_tax_rate = Column(Float, default=0.0)
     created_at = Column(DateTime, server_default=func.now())
 
     members = relationship("User", back_populates="house", foreign_keys=[User.house_id])
     lord = relationship("User", foreign_keys=[lord_id])
     high_lord = relationship("User", foreign_keys=[high_lord_id])
+
+
+class HukmdorClaim(Base):
+    """Bir hududdagi Hukmdorlik da'vosi jarayoni"""
+    __tablename__ = "hukmdor_claims"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    claimant_house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
+    region = Column(Enum(RegionEnum), nullable=False)
+    status = Column(Enum(ClaimStatusEnum), default=ClaimStatusEnum.PENDING)
+    created_at = Column(DateTime, server_default=func.now())
+    resolved_at = Column(DateTime, nullable=True)
+
+    claimant = relationship("House", foreign_keys=[claimant_house_id])
+
+
+class HukmdorClaimResponse(Base):
+    """Boshqa xonadonlarning da'voga javobi"""
+    __tablename__ = "hukmdor_claim_responses"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    claim_id = Column(Integer, ForeignKey("hukmdor_claims.id"), nullable=False)
+    house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
+    accepted = Column(Boolean, nullable=True)  # None=javob kutilmoqda, True=qabul, False=rad
+    responded_at = Column(DateTime, nullable=True)
+
+    claim = relationship("HukmdorClaim")
+    house = relationship("House", foreign_keys=[house_id])
 
 
 class Alliance(Base):
@@ -104,6 +143,8 @@ class War(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     attacker_house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
     defender_house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
+    war_type = Column(Enum(WarTypeEnum), default=WarTypeEnum.EXTERNAL)
+    claim_id = Column(Integer, ForeignKey("hukmdor_claims.id"), nullable=True)  # Civil urush uchun
     status = Column(Enum(WarStatusEnum), default=WarStatusEnum.DECLARED)
     declared_at = Column(DateTime, server_default=func.now())
     grace_ends_at = Column(DateTime, nullable=True)
@@ -165,13 +206,12 @@ class MarketPrice(Base):
     __tablename__ = "market_prices"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    item_type = Column(String(32), nullable=False, unique=True)  # soldier, dragon, scorpion
+    item_type = Column(String(32), nullable=False, unique=True)
     price = Column(Integer, nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class BotSettings(Base):
-    """Admin tomonidan o'zgartiriluvchi sozlamalar — DB da saqlanadi, deploy da yo'qolmaydi"""
     __tablename__ = "bot_settings"
 
     key = Column(String(64), primary_key=True)
