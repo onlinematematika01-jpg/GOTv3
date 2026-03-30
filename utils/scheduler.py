@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
+TASHKENT_TZ = "Asia/Tashkent"
 
 async def daily_farm_job(bot: Bot):
     """Kunlik farm: har a'zo xonadon xazinasiga qo'shadi (Lord +50, A'zo +20)"""
@@ -21,7 +22,6 @@ async def daily_farm_job(bot: Bot):
         result = await session.execute(select(User).where(User.is_active == True))
         all_users = result.scalars().all()
 
-        # Har xonadon bo'yicha farm summani hisoblash
         house_farm: dict[int, int] = {}
         for user in all_users:
             if user.role == RoleEnum.ADMIN or not user.house_id:
@@ -29,18 +29,15 @@ async def daily_farm_job(bot: Bot):
             amount = 50 if user.role in [RoleEnum.HIGH_LORD, RoleEnum.LORD] else 20
             house_farm[user.house_id] = house_farm.get(user.house_id, 0) + amount
 
-        # Xazinalarga qo'shish
         for house_id, total in house_farm.items():
             await house_repo.update_treasury(house_id, total)
 
-        # O'lpon: vassal xonadoni Hukmdor xonadoniga 100 tanga/a'zo
         all_houses = await house_repo.get_all()
         for house in all_houses:
             if house.lord_id and house.high_lord_id:
                 member_count = await user_repo.count_house_members(house.id)
                 tribute = 100 * member_count
                 await house_repo.update_treasury(house.id, -tribute)
-                # Hukmdor xonadonini topib xazinasiga qo'shamiz
                 hl_result = await session.execute(
                     select(User).where(User.id == house.high_lord_id)
                 )
@@ -48,30 +45,27 @@ async def daily_farm_job(bot: Bot):
                 if hl_user and hl_user.house_id:
                     await house_repo.update_treasury(hl_user.house_id, tribute)
 
-        # Referal hisoblagichni nollash
         await session.execute(update(User).values(referral_count_today=0))
         await session.commit()
 
-        logger.info("✅ Kunlik farm bajarildi")
+    logger.info("✅ Kunlik farm bajarildi")
 
-        # Xabarnoma (faqat lord va high_lord ga)
-        for user in all_users:
-            if user.role == RoleEnum.ADMIN or not user.house_id:
-                continue
-            if user.role not in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
-                amount = 20
-            else:
-                amount = 50
-            try:
-                await bot.send_message(
-                    user.id,
-                    f"🌾 <b>Kunlik farm!</b>\n"
-                    f"+{amount} tanga xonadon xazinasiga qo'shildi.",
-                    parse_mode="HTML"
-                )
-            except Exception:
-                pass
-
+    for user in all_users:
+        if user.role == RoleEnum.ADMIN or not user.house_id:
+            continue
+        if user.role not in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
+            amount = 20
+        else:
+            amount = 50
+        try:
+            await bot.send_message(
+                user.id,
+                f"🌾 <b>Kunlik farm!</b>\n"
+                f"+{amount} tanga xonadon xazinasiga qo'shildi.",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
 
 async def check_grace_period_job(bot: Bot):
     """Grace Period tugagan urushlarni FIGHTING ga o'tkazish"""
@@ -99,7 +93,6 @@ async def check_grace_period_job(bot: Bot):
                 except Exception:
                     pass
 
-
 async def end_war_time_job(bot: Bot):
     """23:00 da barcha aktiv urushlarni avtomatik yakunlash"""
     from utils.battle import calculate_battle
@@ -120,7 +113,6 @@ async def end_war_time_job(bot: Bot):
             attacker = war.attacker
             defender = war.defender
 
-            # Ittifoqchi yordamlarini yuklash
             from database.models import WarAllySupport
             from utils.battle import AllyContribution
             from sqlalchemy import select as sa_select
@@ -155,7 +147,6 @@ async def end_war_time_job(bot: Bot):
                 for s in ally_supports if s.side == "defender"
             ]
 
-            # Hisob-kitob
             result = calculate_battle(
                 attacker, defender,
                 defender_gold=defender.treasury,
@@ -163,52 +154,24 @@ async def end_war_time_job(bot: Bot):
                 defender_allies=defender_allies,
             )
 
-            # G'olibga o'lja berish
             if result.attacker_wins:
                 await house_repo.update_treasury(attacker.id, result.loot_gold)
                 await house_repo.update_treasury(defender.id, -min(result.loot_gold, defender.treasury))
-                await house_repo.update_military(
-                    attacker.id,
-                    soldiers=-result.attacker_soldiers_lost,
-                    dragons=-result.attacker_dragons_lost,
-                )
-                await house_repo.update_military(
-                    defender.id,
-                    soldiers=-result.defender_soldiers_lost,
-                    dragons=-result.defender_dragons_lost,
-                )
+                await house_repo.update_military(attacker.id, soldiers=-result.attacker_soldiers_lost, dragons=-result.attacker_dragons_lost)
+                await house_repo.update_military(defender.id, soldiers=-result.defender_soldiers_lost, dragons=-result.defender_dragons_lost)
                 await _handle_lord_succession(session, war, bot)
             else:
                 await house_repo.update_treasury(defender.id, result.loot_gold)
                 await house_repo.update_treasury(attacker.id, -min(result.loot_gold, attacker.treasury))
-                await house_repo.update_military(
-                    attacker.id,
-                    soldiers=-result.attacker_soldiers_lost,
-                    dragons=-result.attacker_dragons_lost,
-                )
-                await house_repo.update_military(
-                    defender.id,
-                    soldiers=-result.defender_soldiers_lost,
-                    dragons=-result.defender_dragons_lost,
-                )
+                await house_repo.update_military(attacker.id, soldiers=-result.attacker_soldiers_lost, dragons=-result.attacker_dragons_lost)
+                await house_repo.update_military(defender.id, soldiers=-result.defender_soldiers_lost, dragons=-result.defender_dragons_lost)
 
-            # Ittifoqchi yo'qotmalarini qo'llash
             for house_id, losses in result.attacker_ally_losses.items():
                 if losses["soldiers"] > 0 or losses["dragons"] > 0:
-                    await house_repo.update_military(
-                        house_id,
-                        soldiers=-losses["soldiers"],
-                        dragons=-losses["dragons"],
-                        scorpions=-losses.get("scorpions", 0),
-                    )
+                    await house_repo.update_military(house_id, soldiers=-losses["soldiers"], dragons=-losses["dragons"], scorpions=-losses.get("scorpions", 0))
             for house_id, losses in result.defender_ally_losses.items():
                 if losses["soldiers"] > 0 or losses["dragons"] > 0:
-                    await house_repo.update_military(
-                        house_id,
-                        soldiers=-losses["soldiers"],
-                        dragons=-losses["dragons"],
-                        scorpions=-losses.get("scorpions", 0),
-                    )
+                    await house_repo.update_military(house_id, soldiers=-losses["soldiers"], dragons=-losses["dragons"], scorpions=-losses.get("scorpions", 0))
 
             await war_repo.end_war(
                 war.id, result.winner_id, result.loot_gold,
@@ -218,7 +181,6 @@ async def end_war_time_job(bot: Bot):
                 defender_dragons_lost=result.defender_dragons_lost,
             )
 
-            # Xronika
             winner = attacker if result.winner_id == attacker.id else defender
             loser = defender if result.winner_id == attacker.id else attacker
             text = format_chronicle(
@@ -233,7 +195,6 @@ async def end_war_time_job(bot: Bot):
             tg_id = await post_to_chronicle(bot, text)
             await chronicle_repo.add("war_ended", text, house_id=winner.id, tg_msg_id=tg_id)
 
-            # Lordlarga natijani yuborish
             for lord_id in [attacker.lord_id, defender.lord_id]:
                 if lord_id:
                     try:
@@ -241,9 +202,7 @@ async def end_war_time_job(bot: Bot):
                     except Exception:
                         pass
 
-
 async def _handle_lord_succession(session, war, bot):
-    """Mag'lub lord almashishi"""
     from database.repositories import UserRepo, HouseRepo
     from database.models import RoleEnum
     user_repo = UserRepo(session)
@@ -257,10 +216,7 @@ async def _handle_lord_succession(session, war, bot):
     if not old_lord:
         return
 
-    # Yangi lord topish
     new_lord = await user_repo.get_most_active_member(defender.id, old_lord.id)
-
-    # Eski lordni surgun qilish
     attacker = war.attacker
     await user_repo.exile_user(old_lord, attacker.id)
 
@@ -268,7 +224,6 @@ async def _handle_lord_succession(session, war, bot):
         new_lord.role = RoleEnum.LORD
         defender.lord_id = new_lord.id
         await session.commit()
-
         try:
             await bot.send_message(
                 new_lord.id,
@@ -279,10 +234,8 @@ async def _handle_lord_succession(session, war, bot):
         except Exception:
             pass
     else:
-        # G'olib o'z odamini tayinlaydi (lord_id = None qoladi, keyingi /start da to'ldiriladi)
         defender.lord_id = None
         await session.commit()
-
 
 async def check_iron_bank_debt_job(bot: Bot):
     """Har kuni qarzni tekshirish, muddati o'tganlarga jazo berish"""
@@ -317,14 +270,13 @@ async def check_iron_bank_debt_job(bot: Bot):
                 except Exception:
                     pass
 
-        logger.info(f"Temir Bank tekshiruvi: {len(overdue)} ta muddati o'tgan qarz topildi")
-
+    logger.info(f"Temir Bank tekshiruvi: {len(overdue)} ta muddati o'tgan qarz topildi")
 
 async def setup_scheduler(scheduler: AsyncIOScheduler, bot: Bot):
-    # Kunlik farm - har kuni 08:00 UTC
+    # Kunlik farm - har kuni 08:00 Toshkent vaqtida
     scheduler.add_job(
         daily_farm_job,
-        CronTrigger(hour=8, minute=0),
+        CronTrigger(hour=8, minute=0, timezone=TASHKENT_TZ),
         args=[bot],
         id="daily_farm",
         replace_existing=True,
@@ -340,19 +292,19 @@ async def setup_scheduler(scheduler: AsyncIOScheduler, bot: Bot):
         replace_existing=True,
     )
 
-    # Urush tugashi - har kuni 23:00 UTC
+    # Urush tugashi - har kuni 23:00 Toshkent vaqtida
     scheduler.add_job(
         end_war_time_job,
-        CronTrigger(hour=23, minute=0),
+        CronTrigger(hour=23, minute=0, timezone=TASHKENT_TZ),
         args=[bot],
         id="war_end",
         replace_existing=True,
     )
 
-    # Temir Bank tekshiruvi - har kuni 00:00 UTC
+    # Temir Bank tekshiruvi - har kuni 00:00 Toshkent vaqtida
     scheduler.add_job(
         check_iron_bank_debt_job,
-        CronTrigger(hour=0, minute=0),
+        CronTrigger(hour=0, minute=0, timezone=TASHKENT_TZ),
         args=[bot],
         id="iron_bank_check",
         replace_existing=True,
@@ -368,7 +320,7 @@ async def setup_scheduler(scheduler: AsyncIOScheduler, bot: Bot):
         replace_existing=True,
     )
 
-    # Da'vo muddati tugashini tekshirish (1 soat javob bermaganlar) - har 15 daqiqada
+    # Da'vo muddati tugashini tekshirish - har 15 daqiqada
     scheduler.add_job(
         check_claim_timeouts_job,
         "interval",
@@ -378,18 +330,14 @@ async def setup_scheduler(scheduler: AsyncIOScheduler, bot: Bot):
         replace_existing=True,
     )
 
-    logger.info("Scheduler jobs o'rnatildi")
-
+    logger.info("Scheduler jobs o'rnatildi (Toshkent vaqti)")
 
 async def check_civil_wars_job(bot: Bot):
-    """Civil urushlar tugashini tekshirib, Hukmdorni belgilash"""
     from handlers.claim import check_claim_wars_ended
     async with AsyncSessionFactory() as session:
         await check_claim_wars_ended(bot, session)
 
-
 async def check_claim_timeouts_job(bot: Bot):
-    """1 soat ichida javob bermagan xonadonlarni rad etilgan deb belgilash va urush boshlash"""
     from database.models import HukmdorClaim, HukmdorClaimResponse, ClaimStatusEnum, WarTypeEnum
     from database.repositories import HukmdorClaimRepo, HouseRepo, WarRepo
     from sqlalchemy import select
@@ -400,60 +348,27 @@ async def check_claim_timeouts_job(bot: Bot):
         house_repo = HouseRepo(session)
         war_repo = WarRepo(session)
 
-        # Faol PENDING da'volar
         result = await session.execute(
-            select(HukmdorClaim).where(
-                HukmdorClaim.status == ClaimStatusEnum.PENDING,
-            )
+            select(HukmdorClaim).where(HukmdorClaim.status == ClaimStatusEnum.PENDING)
         )
-        claims = result.scalars().all()
+        pending_claims = result.scalars().all()
 
         now = datetime.utcnow()
-        local_hour = (now.hour + 5) % 24
-        war_possible = settings.WAR_START_HOUR <= local_hour < settings.WAR_DECLARE_DEADLINE
-
-        for claim in claims:
-            # 1 soatdan oshgan da'vo
-            if (now - claim.created_at).total_seconds() < 3600:
+        for claim in pending_claims:
+            deadline = claim.created_at + timedelta(hours=1)
+            if now < deadline:
                 continue
 
-            responses = await claim_repo.get_all_responses(claim.id)
-            claimant = await house_repo.get_by_id(claim.claimant_house_id)
+            resp_result = await session.execute(
+                select(HukmdorClaimResponse).where(
+                    HukmdorClaimResponse.claim_id == claim.id,
+                    HukmdorClaimResponse.accepted == None,
+                )
+            )
+            no_response = resp_result.scalars().all()
 
-            for resp in responses:
-                if resp.accepted is not None:
-                    continue
+            for resp in no_response:
+                resp.accepted = False
+                resp.responded_at = now
 
-                # Javob bermagan — rad etilgan deb hisoblanadi
-                await claim_repo.set_response(claim.id, resp.house_id, accepted=False)
-                defender = await house_repo.get_by_id(resp.house_id)
-
-                if defender and defender.lord_id:
-                    try:
-                        await bot.send_message(
-                            defender.lord_id,
-                            f"⏰ <b>Muddati o'tdi!</b>\n\n"
-                            f"<b>{claimant.name}</b> xonadonining hukmdorlik da'vosiga "
-                            f"javob bermaganligi sababli rad etildi.\n"
-                            f"{'⚔️ Urush boshlanmoqda!' if war_possible else '⚔️ Urush vaqtida boshlanadi.'}",
-                            parse_mode="HTML"
-                        )
-                    except Exception:
-                        pass
-
-                if war_possible:
-                    active = await war_repo.get_active_war(resp.house_id)
-                    if not active:
-                        grace_ends = now + timedelta(minutes=settings.GRACE_PERIOD_MINUTES)
-                        war = await war_repo.create_war(claimant.id, resp.house_id, grace_ends)
-                        from sqlalchemy import update
-                        from database.models import War
-                        await session.execute(
-                            update(War).where(War.id == war.id).values(
-                                war_type=WarTypeEnum.CIVIL,
-                                claim_id=claim.id,
-                            )
-                        )
-                        await session.commit()
-
-            await claim_repo.set_status(claim.id, ClaimStatusEnum.IN_PROGRESS)
+            await session.commit()
