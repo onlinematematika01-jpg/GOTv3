@@ -14,6 +14,8 @@ def main_menu_keyboard(role: RoleEnum) -> ReplyKeyboardMarkup:
     builder.row(KeyboardButton(text="⚔️ Urush"), KeyboardButton(text="🛒 Bozor"))
     builder.row(KeyboardButton(text="🏦 Temir Bank"), KeyboardButton(text="📜 Xronika"))
     builder.row(KeyboardButton(text="💬 Ichki Chat"), KeyboardButton(text="🤝 Diplomatiya"))
+    if role in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
+        builder.row(KeyboardButton(text="👑 Hukmdorlik Da'vosi"))
     if role in [RoleEnum.ADMIN]:
         builder.row(KeyboardButton(text="🔧 Admin Panel"))
     return builder.as_markup(resize_keyboard=True)
@@ -83,6 +85,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="🏰 Xonadonlar", callback_data="admin:houses")
     builder.button(text="📢 Xabar Yuborish", callback_data="admin:broadcast")
     builder.button(text="🏰 Xonadon Qo'shish", callback_data="admin:add_house")
+    builder.button(text="👑 Hukmdor Tayinlash", callback_data="admin:set_high_lord")
     builder.button(text="🏦 Bank Limiti", callback_data="admin:bank_limits")
     builder.button(text="🗑 Bazani Tozalash", callback_data="admin:reset_db")
     builder.adjust(2)
