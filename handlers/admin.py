@@ -378,24 +378,12 @@ async def admin_add_house_start(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
         return
 
-    # Bo'sh (xonadonsiz) regionlarni topamiz
-    async with AsyncSessionFactory() as session:
-        result = await session.execute(select(House.region))
-        used_regions = {r for r, in result.all()}
-
-    free = {k: v for k, v in REGION_NAMES.items() if REGION_LIST[k] not in used_regions}
-
-    if not free:
-        await callback.answer("❌ Barcha xududlarda xonadon mavjud!", show_alert=True)
-        return
-
-    region_text = "\n".join([f"{k}. {v}" for k, v in free.items()])
-    await state.update_data(free_regions=list(free.keys()))
+    region_text = "\n".join([f"{k}. {v}" for k, v in REGION_NAMES.items()])
     await state.set_state(AdminState.waiting_house_region)
     await callback.answer()
     await callback.message.answer(
         f"🏰 <b>Yangi xonadon qo'shish</b>\n\n"
-        f"Bo'sh xududlar:\n{region_text}\n\n"
+        f"Xududlar:\n{region_text}\n\n"
         f"Xududning raqamini kiriting:",
         parse_mode="HTML"
     )
@@ -406,11 +394,9 @@ async def admin_add_house_region(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
 
-    data = await state.get_data()
     choice = message.text.strip()
-
-    if choice not in data.get("free_regions", []):
-        await message.answer("❌ Noto'g'ri raqam. Ro'yxatdan tanlang.")
+    if choice not in REGION_NAMES:
+        await message.answer("❌ Noto'g'ri raqam. 1–9 oralig'ida kiriting.")
         return
 
     await state.update_data(chosen_region=choice)
