@@ -108,18 +108,50 @@ async def end_war_time_job(bot: Bot):
             attacker = war.attacker
             defender = war.defender
 
+            # Ittifoqchi yordamlarini yuklash
+            from database.models import WarAllySupport
+            from utils.battle import AllyContribution
+            from sqlalchemy import select as sa_select
+            ally_result = await session.execute(
+                sa_select(WarAllySupport).where(WarAllySupport.war_id == war.id)
+            )
+            ally_supports = ally_result.scalars().all()
+
+            attacker_allies = [
+                AllyContribution(
+                    house_id=s.ally_house_id,
+                    house_name=s.ally_house.name if s.ally_house else str(s.ally_house_id),
+                    join_type=s.join_type,
+                    soldiers=s.soldiers,
+                    dragons=s.dragons,
+                    scorpions=s.scorpions,
+                )
+                for s in ally_supports if s.side == "attacker"
+            ]
+            defender_allies = [
+                AllyContribution(
+                    house_id=s.ally_house_id,
+                    house_name=s.ally_house.name if s.ally_house else str(s.ally_house_id),
+                    join_type=s.join_type,
+                    soldiers=s.soldiers,
+                    dragons=s.dragons,
+                    scorpions=s.scorpions,
+                )
+                for s in ally_supports if s.side == "defender"
+            ]
+
             # Hisob-kitob
             result = calculate_battle(
                 attacker, defender,
-                attacker_gold=0,  # Uy xazinasidan keyin to'ldiriladi
                 defender_gold=defender.treasury,
+                attacker_allies=attacker_allies,
+                defender_allies=defender_allies,
             )
 
             # G'olibga o'lja berish
-            if result.winner_id == attacker.id:
+            if result.attacker_wins:
                 await house_repo.update_treasury(attacker.id, result.loot_gold)
-                await house_repo.update_treasury(defender.id, -result.loot_gold)
-                # Harbiy ko'rsatkich yangilash
+                await house_repo.update_treasury(defender.id, -min(result.loot_gold, defender.treasury))
                 await house_repo.update_military(
                     attacker.id,
                     soldiers=-result.attacker_soldiers_lost,
@@ -130,11 +162,38 @@ async def end_war_time_job(bot: Bot):
                     soldiers=-result.defender_soldiers_lost,
                     dragons=-result.defender_dragons_lost,
                 )
-                # Lord almashtirish
                 await _handle_lord_succession(session, war, bot)
             else:
                 await house_repo.update_treasury(defender.id, result.loot_gold)
-                await house_repo.update_treasury(attacker.id, -result.loot_gold)
+                await house_repo.update_treasury(attacker.id, -min(result.loot_gold, attacker.treasury))
+                await house_repo.update_military(
+                    attacker.id,
+                    soldiers=-result.attacker_soldiers_lost,
+                    dragons=-result.attacker_dragons_lost,
+                )
+                await house_repo.update_military(
+                    defender.id,
+                    soldiers=-result.defender_soldiers_lost,
+                    dragons=-result.defender_dragons_lost,
+                )
+
+            # Ittifoqchi yo'qotmalarini qo'llash
+            for house_id, losses in result.attacker_ally_losses.items():
+                if losses["soldiers"] > 0 or losses["dragons"] > 0:
+                    await house_repo.update_military(
+                        house_id,
+                        soldiers=-losses["soldiers"],
+                        dragons=-losses["dragons"],
+                        scorpions=-losses.get("scorpions", 0),
+                    )
+            for house_id, losses in result.defender_ally_losses.items():
+                if losses["soldiers"] > 0 or losses["dragons"] > 0:
+                    await house_repo.update_military(
+                        house_id,
+                        soldiers=-losses["soldiers"],
+                        dragons=-losses["dragons"],
+                        scorpions=-losses.get("scorpions", 0),
+                    )
 
             await war_repo.end_war(
                 war.id, result.winner_id, result.loot_gold,
