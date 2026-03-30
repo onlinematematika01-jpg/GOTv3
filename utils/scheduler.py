@@ -13,48 +13,60 @@ logger = logging.getLogger(__name__)
 
 
 async def daily_farm_job(bot: Bot):
-    """Kunlik farm: Lord +50, A'zo +20 xazinaga"""
+    """Kunlik farm: har a'zo xonadon xazinasiga qo'shadi (Lord +50, A'zo +20)"""
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
         house_repo = HouseRepo(session)
 
-        # Barcha foydalanuvchilarni olish
         result = await session.execute(select(User).where(User.is_active == True))
         all_users = result.scalars().all()
 
+        # Har xonadon bo'yicha farm summani hisoblash
+        house_farm: dict[int, int] = {}
         for user in all_users:
-            if user.role == RoleEnum.ADMIN:
+            if user.role == RoleEnum.ADMIN or not user.house_id:
                 continue
             amount = 50 if user.role in [RoleEnum.HIGH_LORD, RoleEnum.LORD] else 20
-            await user_repo.update_gold(user.id, amount)
+            house_farm[user.house_id] = house_farm.get(user.house_id, 0) + amount
 
-        # O'lpon: Har vassal xonadoni Hukmdorga 100 tanga
+        # Xazinalarga qo'shish
+        for house_id, total in house_farm.items():
+            await house_repo.update_treasury(house_id, total)
+
+        # O'lpon: vassal xonadoni Hukmdor xonadoniga 100 tanga/a'zo
         all_houses = await house_repo.get_all()
         for house in all_houses:
             if house.lord_id and house.high_lord_id:
                 member_count = await user_repo.count_house_members(house.id)
                 tribute = 100 * member_count
                 await house_repo.update_treasury(house.id, -tribute)
-                if house.high_lord_id:
-                    await user_repo.update_gold(house.high_lord_id, tribute)
+                # Hukmdor xonadonini topib xazinasiga qo'shamiz
+                hl_result = await session.execute(
+                    select(User).where(User.id == house.high_lord_id)
+                )
+                hl_user = hl_result.scalar_one_or_none()
+                if hl_user and hl_user.house_id:
+                    await house_repo.update_treasury(hl_user.house_id, tribute)
 
-        # Referal bonuslari qayta hisoblash
-        await session.execute(
-            update(User).values(referral_count_today=0)
-        )
+        # Referal hisoblagichni nollash
+        await session.execute(update(User).values(referral_count_today=0))
         await session.commit()
 
         logger.info("✅ Kunlik farm bajarildi")
 
-        # Xabarnoma
+        # Xabarnoma (faqat lord va high_lord ga)
         for user in all_users:
-            if user.role == RoleEnum.ADMIN:
+            if user.role == RoleEnum.ADMIN or not user.house_id:
                 continue
+            if user.role not in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
+                amount = 20
+            else:
+                amount = 50
             try:
-                amount = 50 if user.role in [RoleEnum.HIGH_LORD, RoleEnum.LORD] else 20
                 await bot.send_message(
                     user.id,
-                    f"🌾 <b>Kunlik farm!</b>\n+{amount} oltin hisob-kitobingizga qo'shildi.",
+                    f"🌾 <b>Kunlik farm!</b>\n"
+                    f"+{amount} tanga xonadon xazinasiga qo'shildi.",
                     parse_mode="HTML"
                 )
             except Exception:
