@@ -24,11 +24,12 @@ async def cmd_start(message: Message):
         # Foydalanuvchi mavjudmi?
         user = await user_repo.get_by_id(user_tg.id)
         if user:
+            treasury = user.house.treasury if user.house else 0
             await message.answer(
                 f"🐺 <b>Xush kelibsiz, {user.full_name}!</b>\n\n"
                 f"🏰 Xonadon: {user.house.name if user.house else 'Yo\'q'}\n"
                 f"👑 Rol: {user.role.value}\n"
-                f"💰 Oltin: {user.gold}",
+                f"💰 Xonadon xazinasi: {treasury:,} tanga",
                 reply_markup=main_menu_keyboard(user.role),
                 parse_mode="HTML"
             )
@@ -41,13 +42,13 @@ async def cmd_start(message: Message):
             try:
                 ref_id = int(args[1])
                 ref_user = await user_repo.get_by_id(ref_id)
-                if ref_user:
+                if ref_user and ref_user.house_id:
                     referral_by = ref_id
-                    # Referal bonusi
+                    # Referal bonusi — xonadon xazinasiga
                     ref_count = await user_repo.get_referral_count_today(ref_id)
                     from config.settings import settings
                     if ref_count < settings.MAX_REFERRAL_PER_DAY:
-                        await user_repo.update_gold(ref_id, settings.REFERRAL_BONUS)
+                        await house_repo.update_treasury(ref_user.house_id, settings.REFERRAL_BONUS)
             except (ValueError, TypeError):
                 pass
 
@@ -98,7 +99,7 @@ async def cmd_start(message: Message):
             f"🏰 <b>Xonadon:</b> {house.name}\n"
             f"🗺️ <b>Hudud:</b> {house.region.value}\n"
             f"👑 <b>Sizning rolingiz:</b> {role_text}\n\n"
-            f"💰 Boshlang'ich oltin: 0\n"
+            f"💰 Xonadon xazinasi: {house.treasury:,} tanga\n"
             f"📜 /help — qo'llanma",
             reply_markup=main_menu_keyboard(role),
             parse_mode="HTML"
@@ -117,13 +118,14 @@ async def cmd_help(message: Message):
         "• Hukmdor (Oliy Lord) — hududning rahbari\n"
         "• Lord — 10 kishilik xonadon sardori\n"
         "• A'zo — jangchi/fermer\n\n"
-        "💰 <b>Iqtisod:</b>\n"
-        "• Kunlik farm: Lord +50, A'zo +20\n"
-        "• Referal: +50 tanga (max 10/kun)\n"
-        "• O'lpon: Vassal → Hukmdor 100 tanga/kun\n\n"
+        "💰 <b>Iqtisod (xonadon xazinasi tizimi):</b>\n"
+        "• Kunlik farm: Lord +50, A'zo +20 → xonadon xazinasiga\n"
+        "• Referal bonus xonadon xazinasiga tushadi\n"
+        "• O'lpon: Vassal → Hukmdor xazinasiga 100 tanga/kun\n"
+        "• Xarid faqat Lord tomonidan xazinadan amalga oshiriladi\n\n"
         "⚔️ <b>Urush:</b> 19:00 — 23:00 orasida\n"
         "🛒 <b>Bozor:</b> Askar (1), Ajdar (150), Skorpion (25)\n"
-        "🏦 <b>Temir Bank:</b> Qarz olish/to'lash\n"
+        "🏦 <b>Temir Bank:</b> Qarz xazinaga tushadi, xazinadan to'lanadi\n"
         "💬 <b>Ichki Chat:</b> Xonadon a'zolari bilan muloqot\n"
         "🤝 <b>Diplomatiya:</b> Ittifoq tuzish/buzish\n\n"
         "📊 /profile — profilingiz\n"
