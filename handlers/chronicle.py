@@ -30,7 +30,8 @@ async def show_chronicle(message: Message):
             # UTC dan Toshkent vaqtiga o'tkazish (+5 soat)
             tashkent_time = r.created_at.replace(tzinfo=timezone.utc) + TASHKENT
             date_str = tashkent_time.strftime("%d.%m %H:%M")
-            desc = r.description[:120] + "..." if len(r.description) > 120 else r.description
-            text += f"[{date_str}] {desc}\n\n"
+            # 'desc_text' deb nomlandi - 'desc' SQLAlchemy funksiyasi bilan to'qnashmasin
+            desc_text = r.description[:120] + "..." if len(r.description) > 120 else r.description
+            text += f"[{date_str}] {desc_text}\n\n"
 
         await message.answer(text, parse_mode="HTML")
