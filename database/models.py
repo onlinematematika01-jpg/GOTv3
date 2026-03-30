@@ -56,7 +56,6 @@ class User(Base):
     role = Column(Enum(RoleEnum), default=RoleEnum.MEMBER, nullable=False)
     region = Column(Enum(RegionEnum), nullable=True)
     house_id = Column(Integer, ForeignKey("houses.id"), nullable=True)
-    gold = Column(BigInteger, default=0)
     soldiers = Column(Integer, default=0)
     dragons = Column(Integer, default=0)
     scorpions = Column(Integer, default=0)
