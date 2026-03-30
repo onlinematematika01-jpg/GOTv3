@@ -263,6 +263,19 @@ class AllianceRepo:
         )
         return result.scalars().all()
 
+    async def get_all_active_for_house(self, house_id: int) -> List[Alliance]:
+        """Xonadonning barcha faol ittifoqlari"""
+        return await self.get_all_for_house(house_id)
+
+    async def break_alliance(self, alliance_id: int):
+        """Bitta ittifoqni buzish"""
+        from datetime import datetime
+        await self.session.execute(
+            update(Alliance).where(Alliance.id == alliance_id)
+            .values(is_active=False, broken_at=datetime.utcnow())
+        )
+        await self.session.commit()
+
 
 class IronBankRepo:
     def __init__(self, session: AsyncSession):
