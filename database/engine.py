@@ -29,13 +29,57 @@ AsyncSessionFactory = async_sessionmaker(
 
 
 async def create_tables():
+    # Avval enum type larni yaratamiz (create_all dan oldin kerak)
+    await _migrate_create_enums()
+
+    # Jadvallarni yaratish
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _migrate_drop_region_unique(conn)
-        await _migrate_add_war_columns(conn)   # <-- YANGI QATOR
-    logger.info("Database jadvallari yaratildi")
+
+    # Ustun migratsiyalari — har biri alohida tranzaksiyada
+    await _migrate_add_column(
+        "wars", "war_type",
+        "ALTER TABLE wars ADD COLUMN war_type wartypeenum NOT NULL DEFAULT 'external'"
+    )
+    await _migrate_add_column(
+        "wars", "claim_id",
+        "ALTER TABLE wars ADD COLUMN claim_id INTEGER REFERENCES hukmdor_claims(id) ON DELETE SET NULL"
+    )
+
+    logger.info("Database jadvallari va migratsiyalar tayyor")
     await _seed_market_prices()
     await _seed_houses()
+
+
+async def _migrate_create_enums():
+    """Yangi PostgreSQL enum type larini yaratish"""
+    async with engine.begin() as conn:
+        try:
+            await conn.execute(text(
+                "CREATE TYPE wartypeenum AS ENUM ('external', 'civil')"
+            ))
+            logger.info("Migration: wartypeenum type yaratildi")
+        except Exception:
+            logger.info("Migration: wartypeenum allaqachon mavjud, o'tkazib yuborildi")
+
+
+async def _migrate_add_column(table: str, column: str, sql: str):
+    """Jadvalga ustun qo'shish — agar allaqachon bo'lsa o'tkazib yuboradi"""
+    async with engine.begin() as conn:
+        result = await conn.execute(text(
+            f"SELECT 1 FROM information_schema.columns "
+            f"WHERE table_name = '{table}' AND column_name = '{column}'"
+        ))
+        exists = result.scalar()
+        if not exists:
+            try:
+                await conn.execute(text(sql))
+                logger.info(f"Migration: {table}.{column} qo'shildi")
+            except Exception as e:
+                logger.warning(f"Migration xatosi ({table}.{column}): {e}")
+        else:
+            logger.info(f"Migration: {table}.{column} allaqachon mavjud")
 
 
 async def _migrate_drop_region_unique(conn):
@@ -58,54 +102,6 @@ async def _migrate_drop_region_unique(conn):
         logger.info("Migration: houses.region unique constraint tekshirildi")
     except Exception as e:
         logger.warning(f"Migration xatosi (muhim emas): {e}")
-
-
-async def _migrate_add_war_columns(conn):
-    """wars jadvaliga war_type va claim_id ustunlarini qo'shish"""
-    try:
-        # 1. wartypeenum PostgreSQL type yaratish
-        await conn.execute(text("""
-            DO $$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_type WHERE typname = 'wartypeenum'
-                ) THEN
-                    CREATE TYPE wartypeenum AS ENUM ('external', 'civil');
-                END IF;
-            END $$;
-        """))
-
-        # 2. war_type ustuni qo'shish
-        await conn.execute(text("""
-            DO $$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_name = 'wars' AND column_name = 'war_type'
-                ) THEN
-                    ALTER TABLE wars
-                    ADD COLUMN war_type wartypeenum NOT NULL DEFAULT 'external';
-                END IF;
-            END $$;
-        """))
-
-        # 3. claim_id ustuni qo'shish
-        await conn.execute(text("""
-            DO $$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_name = 'wars' AND column_name = 'claim_id'
-                ) THEN
-                    ALTER TABLE wars
-                    ADD COLUMN claim_id INTEGER REFERENCES hukmdor_claims(id) ON DELETE SET NULL;
-                END IF;
-            END $$;
-        """))
-
-        logger.info("Migration: wars jadvaliga war_type va claim_id qo'shildi")
-    except Exception as e:
-        logger.warning(f"Migration xatosi (war_columns): {e}")
 
 
 async def _seed_market_prices():
