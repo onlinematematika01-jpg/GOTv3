@@ -10,6 +10,7 @@ from handlers.admin import router as admin_router
 from handlers.chronicle import router as chronicle_router
 from handlers.claim import router as claim_router
 from handlers.rating import router as rating_router
+from handlers.war_ally import router as war_ally_router
 
 
 def register_all_handlers(dp: Dispatcher):
@@ -24,3 +25,4 @@ def register_all_handlers(dp: Dispatcher):
     dp.include_router(chronicle_router)
     dp.include_router(claim_router)
     dp.include_router(rating_router)
+    dp.include_router(war_ally_router)
