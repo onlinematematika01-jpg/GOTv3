@@ -67,7 +67,7 @@ class House(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(128), nullable=False)
-    region = Column(Enum(RegionEnum), nullable=False, unique=True)
+    region = Column(Enum(RegionEnum), nullable=False)
     lord_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
     high_lord_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
     treasury = Column(BigInteger, default=0)  # Xonadon xazinasi
