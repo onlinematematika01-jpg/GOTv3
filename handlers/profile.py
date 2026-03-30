@@ -31,13 +31,15 @@ async def show_profile(message: Message):
         region = user.region.value if user.region else "—"
         role_label = ROLE_LABELS.get(user.role, user.role.value)
 
+        treasury = user.house.treasury if user.house else 0
+
         text = (
             f"👤 <b>{user.full_name}</b>\n"
             f"{'@' + user.username if user.username else ''}\n\n"
             f"👑 <b>Rol:</b> {role_label}\n"
             f"🏰 <b>Xonadon:</b> {house_name}\n"
             f"🗺️ <b>Hudud:</b> {region}\n\n"
-            f"💰 <b>Oltin:</b> {user.gold:,}\n"
+            f"💰 <b>Xonadon xazinasi:</b> {treasury:,} tanga\n"
             f"🗡️ <b>Askarlar:</b> {user.soldiers:,}\n"
             f"🐉 <b>Ajdarlar:</b> {user.dragons}\n"
             f"🏹 <b>Skorpionlar:</b> {user.scorpions}\n\n"
