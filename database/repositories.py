@@ -515,3 +515,59 @@ class HukmdorClaimRepo:
                         pass
 
         await self.session.commit()
+
+
+class RatingRepo:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_power_ranking(self, limit: int = 10) -> List[House]:
+        """Umumiy kuch: askarlar + ajdarlar*200 + skorpionlar*25"""
+        from sqlalchemy import text
+        result = await self.session.execute(
+            select(House)
+            .order_by(
+                (House.total_soldiers + House.total_dragons * 200 + House.total_scorpions * 25).desc()
+            )
+            .limit(limit)
+        )
+        return result.scalars().all()
+
+    async def get_soldiers_ranking(self, limit: int = 10) -> List[House]:
+        """Askarlar soni bo'yicha"""
+        result = await self.session.execute(
+            select(House)
+            .order_by(House.total_soldiers.desc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
+    async def get_gold_ranking(self, limit: int = 10) -> List[House]:
+        """Xonadon xazinasi bo'yicha"""
+        result = await self.session.execute(
+            select(House)
+            .order_by(House.treasury.desc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
+    async def get_dragons_ranking(self, limit: int = 10) -> List[House]:
+        """Ajdarlar + Skorpionlar bo'yicha"""
+        result = await self.session.execute(
+            select(House)
+            .order_by(House.total_dragons.desc(), House.total_scorpions.desc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
+    async def get_wins_ranking(self, limit: int = 10) -> List[tuple]:
+        """Urushda g'alaba soniga ko'ra xonadonlar reytingi"""
+        result = await self.session.execute(
+            select(House.name, func.count(War.id).label("wins"))
+            .join(War, War.winner_house_id == House.id)
+            .where(War.status == WarStatusEnum.ENDED)
+            .group_by(House.id, House.name)
+            .order_by(func.count(War.id).desc())
+            .limit(limit)
+        )
+        return result.all()
