@@ -27,12 +27,6 @@ class UserRepo:
         await self.session.refresh(user)
         return user
 
-    async def update_gold(self, user_id: int, amount: int):
-        await self.session.execute(
-            update(User).where(User.id == user_id).values(gold=User.gold + amount)
-        )
-        await self.session.commit()
-
     async def get_house_members(self, house_id: int) -> List[User]:
         result = await self.session.execute(
             select(User).where(User.house_id == house_id, User.is_active == True)
@@ -82,14 +76,14 @@ class UserRepo:
         await self.session.commit()
 
     async def get_most_active_member(self, house_id: int, exclude_id: int) -> Optional[User]:
-        """Eng ko'p oltin to'plagan a'zo (keyingi lord uchun)"""
+        """Eng birinchi topilgan a'zo (keyingi lord uchun)"""
         result = await self.session.execute(
             select(User).where(
                 User.house_id == house_id,
                 User.role == RoleEnum.MEMBER,
                 User.id != exclude_id,
                 User.is_active == True
-            ).order_by(User.gold.desc())
+            ).order_by(User.id)
         )
         return result.scalars().first()
 
@@ -281,7 +275,7 @@ class IronBankRepo:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def create_loan(self, user_id: int, principal: int, rate: float, due_date) -> IronBankLoan:
+    async def create_loan(self, user_id: int, house_id: int, principal: int, rate: float, due_date) -> IronBankLoan:
         total = math.ceil(principal * (1 + rate))
         loan = IronBankLoan(
             user_id=user_id,
@@ -291,22 +285,37 @@ class IronBankRepo:
             due_date=due_date,
         )
         self.session.add(loan)
+        # Qarz xonadon xazinasiga tushadi
+        await self.session.execute(
+            update(House).where(House.id == house_id).values(
+                treasury=House.treasury + principal,
+            )
+        )
+        # Foydalanuvchi qarz miqdorini kuzatish uchun debt saqlanadi
         await self.session.execute(
             update(User).where(User.id == user_id).values(
-                gold=User.gold + principal,
                 debt=User.debt + total,
             )
         )
         await self.session.commit()
         return loan
 
-    async def repay(self, user: User, amount: int) -> dict:
-        if user.gold < amount:
-            return {"success": False, "reason": "Yetarli oltin yo'q"}
+    async def repay(self, user: User, house_id: int, amount: int) -> dict:
+        # Xazinada yetarli mablag' bormi?
+        result = await self.session.execute(
+            select(House).where(House.id == house_id)
+        )
+        house = result.scalar_one_or_none()
+        if not house or house.treasury < amount:
+            return {"success": False, "reason": "Xonadon xazinasida yetarli oltin yo'q"}
         actual = min(amount, user.debt)
         await self.session.execute(
+            update(House).where(House.id == house_id).values(
+                treasury=House.treasury - actual,
+            )
+        )
+        await self.session.execute(
             update(User).where(User.id == user.id).values(
-                gold=User.gold - actual,
                 debt=User.debt - actual,
             )
         )
@@ -314,9 +323,18 @@ class IronBankRepo:
         return {"success": True, "paid": actual, "remaining": user.debt - actual}
 
     async def confiscate_for_debt(self, user: User):
-        """Qarz to'lanmasa — qo'shin va ajdarlar musodara"""
+        """Qarz to'lanmasa — xonadon qo'shin va ajdarlari musodara"""
+        if not user.house_id:
+            return
         await self.session.execute(
-            update(User).where(User.id == user.id).values(
+            update(House).where(House.id == user.house_id).values(
+                total_soldiers=0,
+                total_dragons=0,
+            )
+        )
+        # Barcha a'zolarning shaxsiy qo'shinlarini ham nolga tushirish
+        await self.session.execute(
+            update(User).where(User.house_id == user.house_id).values(
                 soldiers=0,
                 dragons=0,
                 debt=0,
