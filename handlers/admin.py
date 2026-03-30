@@ -523,14 +523,18 @@ async def admin_give_gold(message: Message, state: FSMContext):
 
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
+        house_repo = HouseRepo(session)
         target = await user_repo.get_by_id(target_id)
         if not target:
             await message.answer("❌ Foydalanuvchi topilmadi.")
             return
-        await user_repo.update_gold(target_id, amount)
+        if not target.house_id:
+            await message.answer("❌ Foydalanuvchining xonadoni yo'q.")
+            return
+        await house_repo.update_treasury(target.house_id, amount)
 
-    await message.answer(f"✅ {target.full_name} ga {amount} oltin berildi!")
+    await message.answer(f"✅ {target.full_name} xonadoniga {amount} oltin berildi!")
     try:
-        await message.bot.send_message(target_id, f"🎁 Admindan {amount} oltin sovg'a qilindi!")
+        await message.bot.send_message(target_id, f"🎁 Admindan {amount} oltin xonadon xazinasiga sovg'a qilindi!")
     except Exception:
         pass
