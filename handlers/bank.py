@@ -2,15 +2,18 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo, IronBankRepo, BotSettingsRepo
+from database.repositories import UserRepo, HouseRepo, IronBankRepo, BotSettingsRepo, ChronicleRepo
 from database.models import IronBankLoan
 from keyboards import iron_bank_keyboard, back_only_keyboard
 from config.settings import settings
+from utils.chronicle import post_to_chronicle, format_chronicle
 from sqlalchemy import select
 
 router = Router()
+
+TASHKENT = timedelta(hours=5)
 
 class BankState(StatesGroup):
     waiting_loan_amount = State()
@@ -127,7 +130,9 @@ async def process_loan(message: Message, state: FSMContext):
 
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
+        house_repo = HouseRepo(session)
         iron_bank_repo = IronBankRepo(session)
+        chronicle_repo = ChronicleRepo(session)
         user = await user_repo.get_by_id(message.from_user.id)
 
         if not user:
@@ -156,11 +161,25 @@ async def process_loan(message: Message, state: FSMContext):
 
         await iron_bank_repo.create_loan(user.id, user.house_id, amount, rate, due_date)
 
+        # Xronikaga yozish va kanalga yuborish
+        house = await house_repo.get_by_id(user.house_id)
+        house_name = house.name if house else "Noma'lum"
+        chronicle_text = format_chronicle(
+            "loan",
+            house=house_name,
+            amount=amount,
+            total_due=total_due,
+        )
+        tg_id = await post_to_chronicle(message.bot, chronicle_text)
+        await chronicle_repo.add("loan", chronicle_text, house_id=user.house_id, tg_msg_id=tg_id)
+
+        # Muddatni Toshkent vaqtida ko'rsatish
+        due_tashkent = due_date.replace(tzinfo=timezone.utc) + TASHKENT
         await message.answer(
             f"🏦 <b>Qarz berildi!</b>\n\n"
             f"💰 Xonadon xazinasiga tushdi: {amount:,} tanga\n"
             f"📈 Foiz bilan qaytarish: {total_due:,} tanga\n"
-            f"📅 To'lash muddati: {due_date.strftime('%Y-%m-%d')}\n\n"
+            f"📅 To'lash muddati: {due_tashkent.strftime('%Y-%m-%d')} (Toshkent)\n\n"
             f"⚠️ Muddatda to'lamasangiz — qo'shinlaringiz musodara qilinadi!",
             reply_markup=back_only_keyboard("bank:back"),
             parse_mode="HTML"
@@ -201,7 +220,9 @@ async def process_repay(message: Message, state: FSMContext):
 
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
+        house_repo = HouseRepo(session)
         iron_bank_repo = IronBankRepo(session)
+        chronicle_repo = ChronicleRepo(session)
         user = await user_repo.get_by_id(message.from_user.id)
 
         if not user:
@@ -229,6 +250,18 @@ async def process_repay(message: Message, state: FSMContext):
         result = await iron_bank_repo.repay(user, user.house_id, amount)
 
         if result["success"]:
+            # Xronikaga yozish va kanalga yuborish
+            house = await house_repo.get_by_id(user.house_id)
+            house_name = house.name if house else "Noma'lum"
+            chronicle_text = format_chronicle(
+                "repay",
+                house=house_name,
+                paid=result["paid"],
+                remaining=result["remaining"],
+            )
+            tg_id = await post_to_chronicle(message.bot, chronicle_text)
+            await chronicle_repo.add("repay", chronicle_text, house_id=user.house_id, tg_msg_id=tg_id)
+
             await message.answer(
                 f"✅ <b>Qarz to'landi!</b>\n\n"
                 f"💸 Xazinadan to'landi: {result['paid']:,} tanga\n"
@@ -272,10 +305,15 @@ async def bank_status(callback: CallbackQuery):
         if loans:
             text += "<b>Faol qarzlar:</b>\n"
             for loan in loans:
+                if loan.due_date:
+                    due_tashkent = loan.due_date.replace(tzinfo=timezone.utc) + TASHKENT
+                    due_str = due_tashkent.strftime('%Y-%m-%d')
+                else:
+                    due_str = "N/A"
                 text += (
                     f"• {loan.principal:,} → {loan.total_due:,} tanga "
                     f"({loan.interest_rate*100:.0f}% foiz)\n"
-                    f"  Muddat: {loan.due_date.strftime('%Y-%m-%d') if loan.due_date else 'N/A'}\n"
+                    f"  Muddat: {due_str}\n"
                 )
         else:
             text += "✅ Faol qarzlar yo'q."
