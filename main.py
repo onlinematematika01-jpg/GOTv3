@@ -17,6 +17,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Global scheduler — reload_farm_jobs uchun
+scheduler = AsyncIOScheduler()
+
 
 async def main():
     bot = Bot(token=settings.BOT_TOKEN)
@@ -35,7 +38,6 @@ async def main():
     await create_tables()
 
     # Scheduler
-    scheduler = AsyncIOScheduler()
     await setup_scheduler(scheduler, bot)
     scheduler.start()
 
