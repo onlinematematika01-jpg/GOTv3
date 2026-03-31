@@ -1,236 +1,318 @@
+from datetime import datetime
+from enum import Enum as PyEnum
+
 from sqlalchemy import (
-    Column, Integer, BigInteger, String, Float, Boolean,
-    DateTime, ForeignKey, Enum, Text, func
+    BigInteger, Boolean, DateTime, Float, ForeignKey,
+    Integer, String, Text, func
 )
-from sqlalchemy.orm import relationship, DeclarativeBase
-import enum
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import ENUM
 
 
 class Base(DeclarativeBase):
     pass
 
 
-class RegionEnum(str, enum.Enum):
-    NORTH = "Shimol"
-    VALE = "Vodiy"
-    RIVERLANDS = "Daryo yerlari"
-    IRON_ISLANDS = "Temir orollar"
-    WESTERLANDS = "G'arbiy yerlar"
-    KINGS_LANDING = "Qirollik bandargohi"
-    REACH = "Tyrellar vodiysi"
-    STORMLANDS = "Bo'ronli yerlar"
-    DORNE = "Dorn"
+# ── Enums ─────────────────────────────────────────────────────────────────────
+
+class UserRole(str, PyEnum):
+    admin      = "admin"
+    high_lord  = "high_lord"
+    lord       = "lord"
+    member     = "member"
 
 
-class RoleEnum(str, enum.Enum):
-    ADMIN = "admin"
-    HIGH_LORD = "high_lord"
-    LORD = "lord"
-    MEMBER = "member"
+class Region(str, PyEnum):
+    north       = "north"
+    vale        = "vale"
+    stormlands  = "stormlands"
+    reach       = "reach"
+    westerlands = "westerlands"
+    riverlands  = "riverlands"
+    iron_islands = "iron_islands"
+    dorne       = "dorne"
+    crownlands  = "crownlands"
 
 
-class WarStatusEnum(str, enum.Enum):
-    DECLARED = "declared"
-    GRACE_PERIOD = "grace_period"
-    FIGHTING = "fighting"
-    ENDED = "ended"
+class WarStatus(str, PyEnum):
+    grace_period = "grace_period"
+    fighting     = "fighting"
+    ended        = "ended"
 
 
-class WarTypeEnum(str, enum.Enum):
-    EXTERNAL = "external"   # Boshqa hududga urush
-    CIVIL = "civil"         # Bir hududdagi xonadonlar o'rtasida Hukmdorlik uchun
+class AllianceStatus(str, PyEnum):
+    active    = "active"
+    dissolved = "dissolved"
 
 
-class ClaimStatusEnum(str, enum.Enum):
-    PENDING = "pending"       # Boshqa xonadonlar javob kutmoqda
-    IN_PROGRESS = "in_progress"  # Urushlar ketmoqda
-    COMPLETED = "completed"   # Hukmdor belgilandi
+class ClaimStatus(str, PyEnum):
+    pending  = "pending"
+    accepted = "accepted"
+    rejected = "rejected"
+    war      = "war"
+    won      = "won"
+    lost     = "lost"
+
+
+class LoanStatus(str, PyEnum):
+    active    = "active"
+    paid      = "paid"
+    defaulted = "defaulted"
+
+
+# ── Models ────────────────────────────────────────────────────────────────────
+
+class House(Base):
+    __tablename__ = "houses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    region: Mapped[Region] = mapped_column(
+        ENUM(Region, name="region_enum", create_type=False), nullable=False
+    )
+    lord_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", use_alter=True), nullable=True
+    )
+    high_lord_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", use_alter=True), nullable=True
+    )
+    treasury: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    total_soldiers: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_dragons: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_scorpions: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_under_occupation: Mapped[bool] = mapped_column(Boolean, default=False)
+    occupier_house_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("houses.id"), nullable=True
+    )
+    permanent_tax_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(BigInteger, primary_key=True)
-    username = Column(String(64), nullable=True)
-    full_name = Column(String(128), nullable=False)
-    role = Column(Enum(RoleEnum), default=RoleEnum.MEMBER, nullable=False)
-    region = Column(Enum(RegionEnum), nullable=True)
-    house_id = Column(Integer, ForeignKey("houses.id"), nullable=True)
-    soldiers = Column(Integer, default=0)
-    dragons = Column(Integer, default=0)
-    scorpions = Column(Integer, default=0)
-    is_exiled = Column(Boolean, default=False)
-    referral_by = Column(BigInteger, ForeignKey("users.id"), nullable=True)
-    referral_count_today = Column(Integer, default=0)
-    last_farm_date = Column(DateTime, nullable=True)
-    last_referral_reset = Column(DateTime, nullable=True)
-    debt = Column(BigInteger, default=0)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, server_default=func.now())
-
-    house = relationship("House", back_populates="members", foreign_keys=[house_id])
-    sent_messages = relationship("InternalMessage", foreign_keys="InternalMessage.sender_id", back_populates="sender")
-
-
-class House(Base):
-    __tablename__ = "houses"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(128), nullable=False)
-    region = Column(Enum(RegionEnum), nullable=False)
-    lord_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
-    high_lord_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
-    treasury = Column(BigInteger, default=0)
-    total_soldiers = Column(Integer, default=0)
-    total_dragons = Column(Integer, default=0)
-    total_scorpions = Column(Integer, default=0)
-    is_under_occupation = Column(Boolean, default=False)
-    occupier_house_id = Column(Integer, ForeignKey("houses.id"), nullable=True)
-    permanent_tax_rate = Column(Float, default=0.0)
-    created_at = Column(DateTime, server_default=func.now())
-
-    members = relationship("User", back_populates="house", foreign_keys=[User.house_id])
-    lord = relationship("User", foreign_keys=[lord_id])
-    high_lord = relationship("User", foreign_keys=[high_lord_id])
-
-
-class HukmdorClaim(Base):
-    """Bir hududdagi Hukmdorlik da'vosi jarayoni"""
-    __tablename__ = "hukmdor_claims"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    claimant_house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
-    region = Column(Enum(RegionEnum), nullable=False)
-    status = Column(Enum(ClaimStatusEnum), default=ClaimStatusEnum.PENDING)
-    created_at = Column(DateTime, server_default=func.now())
-    resolved_at = Column(DateTime, nullable=True)
-
-    claimant = relationship("House", foreign_keys=[claimant_house_id])
-
-
-class HukmdorClaimResponse(Base):
-    """Boshqa xonadonlarning da'voga javobi"""
-    __tablename__ = "hukmdor_claim_responses"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    claim_id = Column(Integer, ForeignKey("hukmdor_claims.id"), nullable=False)
-    house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
-    accepted = Column(Boolean, nullable=True)  # None=javob kutilmoqda, True=qabul, False=rad
-    responded_at = Column(DateTime, nullable=True)
-
-    claim = relationship("HukmdorClaim")
-    house = relationship("House", foreign_keys=[house_id])
-
-
-class Alliance(Base):
-    __tablename__ = "alliances"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    house1_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
-    house2_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, server_default=func.now())
-    broken_at = Column(DateTime, nullable=True)
-
-    house1 = relationship("House", foreign_keys=[house1_id])
-    house2 = relationship("House", foreign_keys=[house2_id])
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)  # Telegram user ID
+    username: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    role: Mapped[UserRole] = mapped_column(
+        ENUM(UserRole, name="userrole_enum", create_type=False),
+        default=UserRole.member
+    )
+    region: Mapped[Region | None] = mapped_column(
+        ENUM(Region, name="region_enum", create_type=False), nullable=True
+    )
+    house_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("houses.id"), nullable=True
+    )
+    soldiers: Mapped[int] = mapped_column(Integer, default=0)
+    dragons: Mapped[int] = mapped_column(Integer, default=0)
+    scorpions: Mapped[int] = mapped_column(Integer, default=0)
+    debt: Mapped[int] = mapped_column(BigInteger, default=0)
+    is_exiled: Mapped[bool] = mapped_column(Boolean, default=False)
+    referral_by: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=True
+    )
+    referral_count_today: Mapped[int] = mapped_column(Integer, default=0)
+    last_farm_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class War(Base):
     __tablename__ = "wars"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    attacker_house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
-    defender_house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
-    war_type = Column(Enum(WarTypeEnum), default=WarTypeEnum.EXTERNAL)
-    claim_id = Column(Integer, ForeignKey("hukmdor_claims.id"), nullable=True)  # Civil urush uchun
-    status = Column(Enum(WarStatusEnum), default=WarStatusEnum.DECLARED)
-    declared_at = Column(DateTime, server_default=func.now())
-    grace_ends_at = Column(DateTime, nullable=True)
-    ended_at = Column(DateTime, nullable=True)
-    winner_house_id = Column(Integer, ForeignKey("houses.id"), nullable=True)
-    attacker_soldiers_lost = Column(Integer, default=0)
-    defender_soldiers_lost = Column(Integer, default=0)
-    attacker_dragons_lost = Column(Integer, default=0)
-    defender_dragons_lost = Column(Integer, default=0)
-    loot_gold = Column(BigInteger, default=0)
-    defender_surrendered = Column(Boolean, default=False)
-
-    attacker = relationship("House", foreign_keys=[attacker_house_id])
-    defender = relationship("House", foreign_keys=[defender_house_id])
-    winner = relationship("House", foreign_keys=[winner_house_id])
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    attacker_house_id: Mapped[int] = mapped_column(Integer, ForeignKey("houses.id"))
+    defender_house_id: Mapped[int] = mapped_column(Integer, ForeignKey("houses.id"))
+    status: Mapped[WarStatus] = mapped_column(
+        ENUM(WarStatus, name="warstatus_enum", create_type=False),
+        default=WarStatus.grace_period
+    )
+    is_civil_war: Mapped[bool] = mapped_column(Boolean, default=False)
+    attacker_soldiers_lost: Mapped[int] = mapped_column(Integer, default=0)
+    attacker_dragons_lost: Mapped[int] = mapped_column(Integer, default=0)
+    attacker_scorpions_lost: Mapped[int] = mapped_column(Integer, default=0)
+    defender_soldiers_lost: Mapped[int] = mapped_column(Integer, default=0)
+    defender_dragons_lost: Mapped[int] = mapped_column(Integer, default=0)
+    defender_scorpions_lost: Mapped[int] = mapped_column(Integer, default=0)
+    gold_looted: Mapped[int] = mapped_column(BigInteger, default=0)
+    winner_house_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("houses.id"), nullable=True
+    )
+    declared_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class WarAllySupport(Base):
-    """Urushda ittifoqchi yordami"""
     __tablename__ = "war_ally_supports"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    war_id = Column(Integer, ForeignKey("wars.id"), nullable=False)
-    ally_house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
-    side = Column(String(16), nullable=False)      # "attacker" | "defender"
-    join_type = Column(String(16), nullable=False) # "full" | "soldiers"
-    soldiers = Column(Integer, default=0)
-    dragons = Column(Integer, default=0)
-    scorpions = Column(Integer, default=0)
-    created_at = Column(DateTime, server_default=func.now())
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    war_id: Mapped[int] = mapped_column(Integer, ForeignKey("wars.id"))
+    ally_house_id: Mapped[int] = mapped_column(Integer, ForeignKey("houses.id"))
+    supported_house_id: Mapped[int] = mapped_column(Integer, ForeignKey("houses.id"))
+    soldiers_sent: Mapped[int] = mapped_column(Integer, default=0)
+    dragons_sent: Mapped[int] = mapped_column(Integer, default=0)
+    scorpions_sent: Mapped[int] = mapped_column(Integer, default=0)
+    is_full_support: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
-    war = relationship("War", foreign_keys=[war_id])
-    ally_house = relationship("House", foreign_keys=[ally_house_id])
+
+class Alliance(Base):
+    __tablename__ = "alliances"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    house1_id: Mapped[int] = mapped_column(Integer, ForeignKey("houses.id"))
+    house2_id: Mapped[int] = mapped_column(Integer, ForeignKey("houses.id"))
+    status: Mapped[AllianceStatus] = mapped_column(
+        ENUM(AllianceStatus, name="alliancestatus_enum", create_type=False),
+        default=AllianceStatus.active
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    dissolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class HukmdorClaim(Base):
+    __tablename__ = "hukmdor_claims"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    claimant_house_id: Mapped[int] = mapped_column(Integer, ForeignKey("houses.id"))
+    region: Mapped[Region] = mapped_column(
+        ENUM(Region, name="region_enum", create_type=False)
+    )
+    status: Mapped[ClaimStatus] = mapped_column(
+        ENUM(ClaimStatus, name="claimstatus_enum", create_type=False),
+        default=ClaimStatus.pending
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class HukmdorClaimResponse(Base):
+    __tablename__ = "hukmdor_claim_responses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    claim_id: Mapped[int] = mapped_column(Integer, ForeignKey("hukmdor_claims.id"))
+    house_id: Mapped[int] = mapped_column(Integer, ForeignKey("houses.id"))
+    accepted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    responded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class IronBankLoan(Base):
     __tablename__ = "iron_bank_loans"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
-    principal = Column(BigInteger, nullable=False)
-    interest_rate = Column(Float, nullable=False)
-    total_due = Column(BigInteger, nullable=False)
-    paid = Column(Boolean, default=False)
-    due_date = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
-
-    user = relationship("User")
-
-
-class InternalMessage(Base):
-    __tablename__ = "internal_messages"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    sender_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
-    house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
-    content = Column(Text, nullable=False)
-    created_at = Column(DateTime, server_default=func.now())
-
-    sender = relationship("User", foreign_keys=[sender_id], back_populates="sent_messages")
-    house = relationship("House")
-
-
-class Chronicle(Base):
-    __tablename__ = "chronicles"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    event_type = Column(String(64), nullable=False)
-    description = Column(Text, nullable=False)
-    related_user_id = Column(BigInteger, nullable=True)
-    related_house_id = Column(Integer, nullable=True)
-    telegram_message_id = Column(Integer, nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    house_id: Mapped[int] = mapped_column(Integer, ForeignKey("houses.id"))
+    amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    interest_rate: Mapped[float] = mapped_column(Float, nullable=False)
+    total_due: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    status: Mapped[LoanStatus] = mapped_column(
+        ENUM(LoanStatus, name="loanstatus_enum", create_type=False),
+        default=LoanStatus.active
+    )
+    due_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class MarketPrice(Base):
     __tablename__ = "market_prices"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    item_type = Column(String(32), nullable=False, unique=True)
-    price = Column(Integer, nullable=False)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    item_type: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    price: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class BotSettings(Base):
     __tablename__ = "bot_settings"
 
-    key = Column(String(64), primary_key=True)
-    value = Column(String(256), nullable=False)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    value: Mapped[str] = mapped_column(String(500), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class Chronicle(Base):
+    __tablename__ = "chronicles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    telegram_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class InternalMessage(Base):
+    __tablename__ = "internal_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    house_id: Mapped[int] = mapped_column(Integer, ForeignKey("houses.id"))
+    sender_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+# ── YANGI: Farm Schedule ───────────────────────────────────────────────────────
+
+class FarmSchedule(Base):
+    """
+    Admin tomonidan belgilangan kunlik farm vaqtlari va miqdorlari.
+    Har bir yozuv bitta farm vaqtini ifodalaydi.
+    Masalan: 08:00 → 50 tanga, 14:30 → 100 tanga, 18:00 → 150 tanga
+    """
+    __tablename__ = "farm_schedules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    hour: Mapped[int] = mapped_column(Integer, nullable=False)    # 0–23
+    minute: Mapped[int] = mapped_column(Integer, nullable=False)  # 0–59
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)  # tanga miqdori
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    def time_str(self) -> str:
+        """Vaqtni HH:MM formatida qaytaradi."""
+        return f"{self.hour:02d}:{self.minute:02d}"
+
+    def __repr__(self) -> str:
+        status = "✅" if self.is_active else "❌"
+        return f"<FarmSchedule {status} {self.time_str()} — {self.amount} tanga>"
