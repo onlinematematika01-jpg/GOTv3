@@ -87,11 +87,13 @@ async def request_loan(callback: CallbackQuery, state: FSMContext):
             await callback.answer("❌ Faqat xonadon lordi qarz ola oladi.", show_alert=True)
             return
 
-        # Avvalgi qarz to'liq to'lanmaguncha yangi qarz bermaslik
-        if user.debt > 0:
+        # Xonadonning to'lanmagan qarzi — lord almashgan bo'lsa ham tekshiriladi
+        iron_bank_repo = IronBankRepo(session)
+        house_debt = await iron_bank_repo.get_house_active_debt(user.house_id)
+        if house_debt > 0:
             await callback.answer(
-                f"❌ Avvalgi qarzingiz hali to'lanmagan!\n"
-                f"Qolgan qarz: {user.debt:,} tanga\n\n"
+                f"❌ Xonadoningizda to'lanmagan qarz bor!\n"
+                f"Qolgan qarz: {house_debt:,} tanga\n\n"
                 f"Yangi qarz olish uchun avval mavjud qarzni to'lang.",
                 show_alert=True
             )
@@ -145,10 +147,11 @@ async def process_loan(message: Message, state: FSMContext):
             await state.clear()
             return
 
-        # Qo'shimcha xavfsizlik tekshiruvi
-        if user.debt > 0:
+        # Xonadonning to'lanmagan qarzi — lord almashgan bo'lsa ham tekshiriladi
+        house_debt = await iron_bank_repo.get_house_active_debt(user.house_id)
+        if house_debt > 0:
             await message.answer(
-                f"❌ Avvalgi qarzingizni to'lang!\nQarz: {user.debt:,} tanga",
+                f"❌ Xonadoningizda to'lanmagan qarz bor!\nQarz: {house_debt:,} tanga",
                 reply_markup=back_only_keyboard("bank:back")
             )
             await state.clear()
