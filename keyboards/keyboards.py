@@ -99,6 +99,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="🏰 Xonadon Qo'shish", callback_data="admin:add_house")
     builder.button(text="👑 Hukmdor Tayinlash", callback_data="admin:set_high_lord")
     builder.button(text="🏦 Bank Limiti", callback_data="admin:bank_limits")
+    builder.button(text="🌾 Farm Jadvali", callback_data="admin:farm_schedule")
     builder.button(text="🗑 Bazani Tozalash", callback_data="admin:reset_db")
     builder.adjust(2)
     return builder.as_markup()
