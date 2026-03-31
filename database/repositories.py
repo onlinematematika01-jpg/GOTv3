@@ -280,10 +280,22 @@ class IronBankRepo:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def get_house_active_debt(self, house_id: int) -> int:
+        """Xonadonning to'lanmagan jami qarzi — lord almashsa ham tekshiriladi"""
+        result = await self.session.execute(
+            select(IronBankLoan).where(
+                IronBankLoan.house_id == house_id,
+                IronBankLoan.paid == False,
+            )
+        )
+        loans = result.scalars().all()
+        return sum(loan.total_due for loan in loans)
+
     async def create_loan(self, user_id: int, house_id: int, principal: int, rate: float, due_date) -> IronBankLoan:
         total = math.ceil(principal * (1 + rate))
         loan = IronBankLoan(
             user_id=user_id,
+            house_id=house_id,
             principal=principal,
             interest_rate=rate,
             total_due=total,
