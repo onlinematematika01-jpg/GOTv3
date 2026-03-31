@@ -19,18 +19,23 @@ logger = logging.getLogger(__name__)
 
 class AllySupportState(StatesGroup):
     entering_soldiers = State()
+    entering_gold = State()
 
 
 def ally_support_keyboard(war_id: int, side: str) -> object:
     """Ittifoqchi uchun yordam tanlash klaviaturasi"""
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="⚔️ Jangga qo'shilish (barcha resurs bilan)",
+        text="⚔️ To'liq qo'shilish (barcha askar + skorpion)",
         callback_data=f"ally:full:{war_id}:{side}"
     )
     builder.button(
-        text="🗡️ Yordam yuborish (askar miqdori tanlash)",
+        text="🗡️ Askar yuborish (miqdor tanlash)",
         callback_data=f"ally:soldiers:{war_id}:{side}"
+    )
+    builder.button(
+        text="💰 Oltin yuborish (miqdor tanlash)",
+        callback_data=f"ally:gold:{war_id}:{side}"
     )
     builder.button(
         text="❌ Rad etish",
@@ -153,15 +158,16 @@ async def ally_join_full(callback: CallbackQuery):
                 except Exception:
                     pass
 
-        # Yordam yozish
+        # Yordam yozish — ajdar YUBORILMAYDI, faqat askar + skorpion
         support = WarAllySupport(
             war_id=war_id,
             ally_house_id=user.house_id,
             side=side,
             join_type="full",
             soldiers=house.total_soldiers,
-            dragons=house.total_dragons,
+            dragons=0,
             scorpions=house.total_scorpions,
+            gold=0,
         )
         session.add(support)
         await session.commit()
@@ -174,7 +180,6 @@ async def ally_join_full(callback: CallbackQuery):
                     main_house.lord_id,
                     f"🤝 <b>{house.name}</b> jangga qo'shildi!\n"
                     f"🗡️ +{house.total_soldiers} askar | "
-                    f"🐉 +{house.total_dragons} ajdar | "
                     f"🏹 +{house.total_scorpions} skorpion",
                     parse_mode="HTML"
                 )
@@ -184,7 +189,8 @@ async def ally_join_full(callback: CallbackQuery):
     await callback.answer()
     await callback.message.edit_text(
         f"⚔️ <b>Jangga qo'shildingiz!</b>\n\n"
-        f"Barcha resurslaringiz urushda ishtirok etadi.\n"
+        f"Askar va skorpionlaringiz urushda ishtirok etadi.\n"
+        f"⚠️ Ajdarlar urushga yuborilmaydi.\n"
         f"G'alaba bo'lsa resurslaringiz qaytadi, "
         f"mag'lubiyatda yo'qoladi.",
         parse_mode="HTML"
@@ -284,6 +290,7 @@ async def ally_send_soldiers_confirm(message: Message, state: FSMContext):
             soldiers=amount,
             dragons=0,
             scorpions=0,
+            gold=0,
         )
         session.add(support)
         await session.commit()
@@ -306,6 +313,139 @@ async def ally_send_soldiers_confirm(message: Message, state: FSMContext):
         f"✅ <b>{amount} askar yuborildi!</b>\n\n"
         f"G'alaba bo'lsa askarlaringiz to'liq qaytadi.\n"
         f"Mag'lubiyatda yo'qoladi.",
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("ally:gold:"))
+async def ally_send_gold_start(callback: CallbackQuery, state: FSMContext):
+    """Oltin yuborish — miqdor kiritish"""
+    _, _, war_id, side = callback.data.split(":")
+
+    async with AsyncSessionFactory() as session:
+        user_repo = UserRepo(session)
+        house_repo = HouseRepo(session)
+        user = await user_repo.get_by_id(callback.from_user.id)
+
+        if not user or not user.house_id:
+            await callback.answer("❌ Xonadoningiz yo'q.", show_alert=True)
+            return
+
+        if user.role not in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
+            await callback.answer("❌ Faqat Lord qaror qabul qila oladi.", show_alert=True)
+            return
+
+        house = await house_repo.get_by_id(user.house_id)
+
+        if house.treasury <= 0:
+            await callback.answer("❌ Xazinangizda oltin yo'q.", show_alert=True)
+            return
+
+        await state.set_state(AllySupportState.entering_gold)
+        await state.update_data(war_id=int(war_id), side=side, house_id=user.house_id)
+
+    await callback.answer()
+    await callback.message.edit_text(
+        f"💰 <b>Necha oltin yubormoqchisiz?</b>\n\n"
+        f"Xazinada: {house.treasury} oltin mavjud.\n"
+        f"Raqam kiriting (1 — {house.treasury}):",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AllySupportState.entering_gold)
+async def ally_send_gold_confirm(message: Message, state: FSMContext):
+    data = await state.get_data()
+    war_id = data["war_id"]
+    side = data["side"]
+
+    try:
+        amount = int(message.text.strip())
+        if amount <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Iltimos, musbat son kiriting.")
+        return
+
+    async with AsyncSessionFactory() as session:
+        user_repo = UserRepo(session)
+        house_repo = HouseRepo(session)
+        alliance_repo = AllianceRepo(session)
+        user = await user_repo.get_by_id(message.from_user.id)
+        house = await house_repo.get_by_id(user.house_id)
+
+        if amount > house.treasury:
+            await message.answer(f"❌ Xazinada faqat {house.treasury} oltin bor.")
+            return
+
+        war_result = await session.execute(
+            select(War).where(War.id == war_id)
+            .options(selectinload(War.attacker), selectinload(War.defender))
+        )
+        war = war_result.scalar_one_or_none()
+
+        if not war or war.status not in [WarStatusEnum.GRACE_PERIOD, WarStatusEnum.FIGHTING]:
+            await message.answer("❌ Bu urush allaqachon tugagan.")
+            await state.clear()
+            return
+
+        # Ittifoq buzilishi tekshiruvi
+        enemy_house_id = war.attacker_house_id if side == "defender" else war.defender_house_id
+        enemy_alliance = await alliance_repo.get_active(user.house_id, enemy_house_id)
+
+        if enemy_alliance:
+            enemy_house = await house_repo.get_by_id(enemy_house_id)
+            await alliance_repo.break_alliance(enemy_alliance.id)
+
+            if enemy_house and enemy_house.lord_id:
+                try:
+                    await message.bot.send_message(
+                        enemy_house.lord_id,
+                        f"💔 <b>ITTIFOQ BUZILDI!</b>\n\n"
+                        f"<b>{house.name}</b> sizga qarshi urushga oltin yubordi!\n"
+                        f"Ittifoqingiz avtomatik bekor qilindi.",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+
+        # Xazinadan oltin ayirish
+        await house_repo.update_treasury(house.id, -amount)
+
+        # Asosiy tomonga oltinni o'tkazish
+        main_house = war.attacker if side == "attacker" else war.defender
+        await house_repo.update_treasury(main_house.id, amount)
+
+        # Yordam yozish (faqat log uchun, oltin allaqachon o'tkazildi)
+        support = WarAllySupport(
+            war_id=war_id,
+            ally_house_id=user.house_id,
+            side=side,
+            join_type="gold",
+            soldiers=0,
+            dragons=0,
+            scorpions=0,
+            gold=amount,
+        )
+        session.add(support)
+        await session.commit()
+
+        # Asosiy tomonga xabar
+        if main_house.lord_id:
+            try:
+                await message.bot.send_message(
+                    main_house.lord_id,
+                    f"🤝 <b>{house.name}</b> {amount} oltin yubordi!\n"
+                    f"💰 Xazinangizga qo'shildi.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+    await state.clear()
+    await message.answer(
+        f"✅ <b>{amount} oltin yuborildi!</b>\n\n"
+        f"Oltin ittifoqchingiz xazinasiga darhol o'tkazildi.",
         parse_mode="HTML"
     )
 
