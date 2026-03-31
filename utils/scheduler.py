@@ -11,6 +11,21 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
+# Global scheduler referensini saqlash uchun — circular import muammosini hal qiladi
+_global_scheduler: AsyncIOScheduler | None = None
+
+
+def set_global_scheduler(scheduler: AsyncIOScheduler):
+    """main.py dan scheduler o'rnatilganda chaqiriladi"""
+    global _global_scheduler
+    _global_scheduler = scheduler
+
+
+def get_global_scheduler() -> AsyncIOScheduler:
+    if _global_scheduler is None:
+        raise RuntimeError("Scheduler hali o'rnatilmagan. set_global_scheduler() chaqiring.")
+    return _global_scheduler
+
 
 async def daily_farm_job(bot: Bot, scheduled_amount: int = 0):
     """Kunlik farm: jadval bo'yicha belgilangan miqdorni xonadon xazinasiga qo'shadi"""
@@ -326,7 +341,7 @@ async def check_iron_bank_debt_job(bot: Bot):
 
 async def reload_farm_jobs(bot):
     """Admin farm jadvalini o'zgartirganda schedulerni qayta yuklash"""
-    from main import scheduler as global_scheduler
+    global_scheduler = get_global_scheduler()
     async with AsyncSessionFactory() as session:
         from database.repositories import BotSettingsRepo
         cfg = BotSettingsRepo(session)
