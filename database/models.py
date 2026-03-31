@@ -142,7 +142,7 @@ class War(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     attacker_house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
     defender_house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
-    war_type = Column(Enum(WarTypeEnum), default=WarTypeEnum.EXTERNAL)
+    war_type = Column(String(16), default=WarTypeEnum.EXTERNAL.value)
     claim_id = Column(Integer, ForeignKey("hukmdor_claims.id"), nullable=True)  # Civil urush uchun
     status = Column(Enum(WarStatusEnum), default=WarStatusEnum.DECLARED)
     declared_at = Column(DateTime, server_default=func.now())
