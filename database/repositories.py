@@ -426,6 +426,23 @@ class BotSettingsRepo:
     async def get_int(self, key: str) -> int:
         return int(await self.get(key))
 
+    async def get_farm_schedules(self) -> list[dict]:
+        """Farm jadvalini olish: [{"hour": 8, "minute": 0, "amount": 50}, ...]"""
+        import json
+        raw = await self.get("farm_schedules")
+        if not raw:
+            # Default: har kuni 08:00 da 50 tanga
+            return [{"hour": 8, "minute": 0, "amount": 50}]
+        try:
+            return json.loads(raw)
+        except Exception:
+            return [{"hour": 8, "minute": 0, "amount": 50}]
+
+    async def set_farm_schedules(self, schedules: list[dict]):
+        """Farm jadvalini saqlash"""
+        import json
+        await self.set("farm_schedules", json.dumps(schedules))
+
 
 class HukmdorClaimRepo:
     def __init__(self, session: AsyncSession):
