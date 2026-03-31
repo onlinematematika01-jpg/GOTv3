@@ -12,8 +12,8 @@ from datetime import datetime, timedelta
 logger = logging.getLogger(__name__)
 
 
-async def daily_farm_job(bot: Bot):
-    """Kunlik farm: har a'zo xonadon xazinasiga qo'shadi (Lord +50, A'zo +20)"""
+async def daily_farm_job(bot: Bot, scheduled_amount: int = 0):
+    """Kunlik farm: jadval bo'yicha belgilangan miqdorni xonadon xazinasiga qo'shadi"""
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
         house_repo = HouseRepo(session)
@@ -26,7 +26,11 @@ async def daily_farm_job(bot: Bot):
         for user in all_users:
             if user.role == RoleEnum.ADMIN or not user.house_id:
                 continue
-            amount = 50 if user.role in [RoleEnum.HIGH_LORD, RoleEnum.LORD] else 20
+            if scheduled_amount > 0:
+                # Admin tomonidan belgilangan miqdor — hamma uchun bir xil
+                amount = scheduled_amount
+            else:
+                amount = 50 if user.role in [RoleEnum.HIGH_LORD, RoleEnum.LORD] else 20
             house_farm[user.house_id] = house_farm.get(user.house_id, 0) + amount
 
         # Xazinalarga qo'shish
@@ -58,7 +62,9 @@ async def daily_farm_job(bot: Bot):
         for user in all_users:
             if user.role == RoleEnum.ADMIN or not user.house_id:
                 continue
-            if user.role not in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
+            if scheduled_amount > 0:
+                amount = scheduled_amount
+            elif user.role not in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
                 amount = 20
             else:
                 amount = 50
@@ -320,15 +326,63 @@ async def check_iron_bank_debt_job(bot: Bot):
         logger.info(f"Temir Bank tekshiruvi: {len(overdue)} ta muddati o'tgan qarz topildi")
 
 
+async def reload_farm_jobs(bot):
+    """Admin farm jadvalini o'zgartirganda schedulerni qayta yuklash"""
+    from main import scheduler as global_scheduler
+    async with AsyncSessionFactory() as session:
+        from database.repositories import BotSettingsRepo
+        cfg = BotSettingsRepo(session)
+        farm_schedules = await cfg.get_farm_schedules()
+
+    # Eski farm joblarini o'chirish
+    for job in global_scheduler.get_jobs():
+        if job.id.startswith("daily_farm_"):
+            global_scheduler.remove_job(job.id)
+
+    # Yangilarini qo'shish
+    for i, sched in enumerate(farm_schedules):
+        global_scheduler.add_job(
+            daily_farm_job,
+            CronTrigger(hour=sched["hour"], minute=sched["minute"]),
+            args=[bot, sched["amount"]],
+            id=f"daily_farm_{i}",
+            replace_existing=True,
+        )
+        logger.info(f"Farm job qayta yuklandi #{i}: {sched['hour']:02d}:{sched['minute']:02d} — {sched['amount']} tanga")
+
+
 async def setup_scheduler(scheduler: AsyncIOScheduler, bot: Bot):
-    # Kunlik farm - har kuni 08:00 UTC
-    scheduler.add_job(
-        daily_farm_job,
-        CronTrigger(hour=8, minute=0),
-        args=[bot],
-        id="daily_farm",
-        replace_existing=True,
-    )
+    # Kunlik farm — DB dan dinamik jadval o'qish
+    async with AsyncSessionFactory() as session:
+        from database.repositories import BotSettingsRepo
+        cfg = BotSettingsRepo(session)
+        farm_schedules = await cfg.get_farm_schedules()
+
+    # Eski farm joblarini tozalash
+    for job in scheduler.get_jobs():
+        if job.id.startswith("daily_farm_"):
+            scheduler.remove_job(job.id)
+
+    # Yangi farm jadvallarini qo'shish
+    for i, sched in enumerate(farm_schedules):
+        scheduler.add_job(
+            daily_farm_job,
+            CronTrigger(hour=sched["hour"], minute=sched["minute"]),
+            args=[bot, sched["amount"]],
+            id=f"daily_farm_{i}",
+            replace_existing=True,
+        )
+        logger.info(f"Farm job #{i}: {sched['hour']:02d}:{sched['minute']:02d} — {sched['amount']} tanga")
+
+    if not farm_schedules:
+        # Default agar jadval bo'sh bo'lsa
+        scheduler.add_job(
+            daily_farm_job,
+            CronTrigger(hour=8, minute=0),
+            args=[bot, 50],
+            id="daily_farm_0",
+            replace_existing=True,
+        )
 
     # Grace period tekshiruvi - har 5 daqiqada
     scheduler.add_job(
