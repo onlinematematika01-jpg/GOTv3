@@ -58,16 +58,14 @@ async def daily_farm_job(bot: Bot, scheduled_amount: int = 0):
 
         logger.info("✅ Kunlik farm bajarildi")
 
-        # Xabarnoma (faqat lord va high_lord ga)
+        # Xabarnoma — barcha faol a'zolarga
         for user in all_users:
             if user.role == RoleEnum.ADMIN or not user.house_id:
                 continue
             if scheduled_amount > 0:
                 amount = scheduled_amount
-            elif user.role not in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
-                amount = 20
             else:
-                amount = 50
+                amount = 50 if user.role in [RoleEnum.HIGH_LORD, RoleEnum.LORD] else 20
             try:
                 await bot.send_message(
                     user.id,
@@ -339,16 +337,16 @@ async def reload_farm_jobs(bot):
         if job.id.startswith("daily_farm_"):
             global_scheduler.remove_job(job.id)
 
-    # Yangilarini qo'shish
+    # Yangilarini qo'shish — vaqt Toshkent (UTC+5) da berilgan
     for i, sched in enumerate(farm_schedules):
         global_scheduler.add_job(
             daily_farm_job,
-            CronTrigger(hour=sched["hour"], minute=sched["minute"]),
+            CronTrigger(hour=sched["hour"], minute=sched["minute"], timezone="Asia/Tashkent"),
             args=[bot, sched["amount"]],
             id=f"daily_farm_{i}",
             replace_existing=True,
         )
-        logger.info(f"Farm job qayta yuklandi #{i}: {sched['hour']:02d}:{sched['minute']:02d} — {sched['amount']} tanga")
+        logger.info(f"Farm job qayta yuklandi #{i}: {sched['hour']:02d}:{sched['minute']:02d} Tashkent — {sched['amount']} tanga")
 
 
 async def setup_scheduler(scheduler: AsyncIOScheduler, bot: Bot):
@@ -363,22 +361,22 @@ async def setup_scheduler(scheduler: AsyncIOScheduler, bot: Bot):
         if job.id.startswith("daily_farm_"):
             scheduler.remove_job(job.id)
 
-    # Yangi farm jadvallarini qo'shish
+    # Yangi farm jadvallarini qo'shish — vaqt Toshkent (UTC+5) da
     for i, sched in enumerate(farm_schedules):
         scheduler.add_job(
             daily_farm_job,
-            CronTrigger(hour=sched["hour"], minute=sched["minute"]),
+            CronTrigger(hour=sched["hour"], minute=sched["minute"], timezone="Asia/Tashkent"),
             args=[bot, sched["amount"]],
             id=f"daily_farm_{i}",
             replace_existing=True,
         )
-        logger.info(f"Farm job #{i}: {sched['hour']:02d}:{sched['minute']:02d} — {sched['amount']} tanga")
+        logger.info(f"Farm job #{i}: {sched['hour']:02d}:{sched['minute']:02d} Tashkent — {sched['amount']} tanga")
 
     if not farm_schedules:
-        # Default agar jadval bo'sh bo'lsa
+        # Default agar jadval bo'sh bo'lsa — Toshkent 08:00
         scheduler.add_job(
             daily_farm_job,
-            CronTrigger(hour=8, minute=0),
+            CronTrigger(hour=8, minute=0, timezone="Asia/Tashkent"),
             args=[bot, 50],
             id="daily_farm_0",
             replace_existing=True,
@@ -394,19 +392,19 @@ async def setup_scheduler(scheduler: AsyncIOScheduler, bot: Bot):
         replace_existing=True,
     )
 
-    # Urush tugashi - har kuni 23:00 UTC
+    # Urush tugashi - har kuni 23:00 Toshkent
     scheduler.add_job(
         end_war_time_job,
-        CronTrigger(hour=23, minute=0),
+        CronTrigger(hour=23, minute=0, timezone="Asia/Tashkent"),
         args=[bot],
         id="war_end",
         replace_existing=True,
     )
 
-    # Temir Bank tekshiruvi - har kuni 00:00 UTC
+    # Temir Bank tekshiruvi - har kuni 00:00 Toshkent
     scheduler.add_job(
         check_iron_bank_debt_job,
-        CronTrigger(hour=0, minute=0),
+        CronTrigger(hour=0, minute=0, timezone="Asia/Tashkent"),
         args=[bot],
         id="iron_bank_check",
         replace_existing=True,
