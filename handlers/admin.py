@@ -33,6 +33,9 @@ class AdminState(StatesGroup):
     # Bank limit sozlash
     waiting_bank_min = State()
     waiting_bank_max = State()
+    # Farm jadvali
+    waiting_farm_time = State()
+    waiting_farm_amount = State()
 
 
 # ─── BANK LIMIT — runtime o'zgaruvchilar ───
@@ -534,3 +537,184 @@ async def admin_give_gold(message: Message, state: FSMContext):
         await message.bot.send_message(target_id, f"🎁 Admindan {amount} oltin sovg'a qilindi!")
     except Exception:
         pass
+
+
+# ─── FARM JADVALI ──────────────────────────────────────────────────────────
+
+def _fmt_schedules(schedules: list[dict]) -> str:
+    if not schedules:
+        return "📭 Hozircha farm jadvali yo'q."
+    lines = []
+    for i, s in enumerate(schedules, 1):
+        lines.append(f"{i}. 🕐 {s['hour']:02d}:{s['minute']:02d} — 💰 {s['amount']} tanga")
+    return "🌾 <b>Joriy farm jadvali:</b>\n\n" + "\n".join(lines)
+
+
+@router.callback_query(F.data == "admin:farm_schedule")
+async def admin_farm_schedule(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        schedules = await cfg.get_farm_schedules()
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Yangi vaqt qo'shish", callback_data="admin:farm_add")],
+        [InlineKeyboardButton(text="🗑 Vaqt o'chirish", callback_data="admin:farm_delete")],
+        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin:back")],
+    ])
+
+    await callback.answer()
+    await callback.message.answer(
+        _fmt_schedules(schedules) + "\n\nNima qilmoqchisiz?",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "admin:farm_add")
+async def admin_farm_add(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    await state.set_state(AdminState.waiting_farm_time)
+    await callback.answer()
+    await callback.message.answer(
+        "🕐 <b>Yangi farm vaqtini kiriting</b>\n\n"
+        "Format: <code>SS:MM</code>\n"
+        "Masalan: <code>08:00</code> yoki <code>14:30</code>",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_farm_time)
+async def admin_farm_time(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+
+    text = message.text.strip()
+    try:
+        parts = text.split(":")
+        if len(parts) != 2:
+            raise ValueError
+        hour = int(parts[0])
+        minute = int(parts[1])
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Noto'g'ri format. SS:MM ko'rinishida kiriting (masalan: 08:00).")
+        return
+
+    await state.update_data(farm_hour=hour, farm_minute=minute)
+    await state.set_state(AdminState.waiting_farm_amount)
+    await message.answer(
+        f"✅ Vaqt: <b>{hour:02d}:{minute:02d}</b>\n\n"
+        f"💰 Endi farm miqdorini kiriting (tanga):\n"
+        f"Masalan: <code>50</code> yoki <code>150</code>",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_farm_amount)
+async def admin_farm_amount(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+
+    try:
+        amount = int(message.text.strip())
+        if amount <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Musbat raqam kiriting.")
+        return
+
+    data = await state.get_data()
+    hour = data["farm_hour"]
+    minute = data["farm_minute"]
+
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        schedules = await cfg.get_farm_schedules()
+
+        existing = next((s for s in schedules if s["hour"] == hour and s["minute"] == minute), None)
+        if existing:
+            existing["amount"] = amount
+        else:
+            schedules.append({"hour": hour, "minute": minute, "amount": amount})
+
+        schedules.sort(key=lambda s: (s["hour"], s["minute"]))
+        await cfg.set_farm_schedules(schedules)
+
+    from utils.scheduler import reload_farm_jobs
+    await reload_farm_jobs(message.bot)
+
+    await message.answer(
+        f"✅ <b>Farm jadvali yangilandi!</b>\n\n"
+        f"🕐 {hour:02d}:{minute:02d} — 💰 {amount} tanga qo'shildi.\n\n"
+        f"{_fmt_schedules(schedules)}",
+        parse_mode="HTML"
+    )
+    await state.clear()
+
+
+@router.callback_query(F.data == "admin:farm_delete")
+async def admin_farm_delete(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        schedules = await cfg.get_farm_schedules()
+
+    if not schedules:
+        await callback.answer("📭 Jadval bo'sh.", show_alert=True)
+        return
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    buttons = []
+    for i, s in enumerate(schedules):
+        label = f"🗑 {s['hour']:02d}:{s['minute']:02d} — {s['amount']} tanga"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"admin:farm_del_{i}")])
+    buttons.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin:farm_schedule")])
+
+    await callback.answer()
+    await callback.message.answer(
+        "🗑 <b>Qaysi vaqtni o'chirmoqchisiz?</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("admin:farm_del_"))
+async def admin_farm_del_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    idx = int(callback.data.split("_")[-1])
+
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        schedules = await cfg.get_farm_schedules()
+
+        if idx >= len(schedules):
+            await callback.answer("❌ Topilmadi.", show_alert=True)
+            return
+
+        removed = schedules.pop(idx)
+        await cfg.set_farm_schedules(schedules)
+
+    from utils.scheduler import reload_farm_jobs
+    await reload_farm_jobs(callback.bot)
+
+    await callback.answer()
+    await callback.message.answer(
+        f"✅ <b>{removed['hour']:02d}:{removed['minute']:02d} — {removed['amount']} tanga</b> o'chirildi.\n\n"
+        f"{_fmt_schedules(schedules)}",
+        parse_mode="HTML"
+    )
