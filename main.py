@@ -1,85 +1,50 @@
 import asyncio
 import logging
-
 from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config.settings import settings
 from database.engine import create_tables
-from utils.scheduler import setup_static_jobs, reload_farm_schedules
-
-# Handlers
-from handlers import (
-    start, profile, market, bank,
-    war, war_ally, diplomacy, claim,
-    rating, chat, chronicle, admin,
-)
+from handlers import register_all_handlers
+from middlewares.auth import AuthMiddleware
+from middlewares.logging import LoggingMiddleware
+from utils.scheduler import setup_scheduler
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# ── Global scheduler (admin.py dan import qilinadi) ───────────────────────────
-scheduler = AsyncIOScheduler(timezone="Asia/Tashkent")
-
-
-async def on_startup(bot: Bot):
-    """Bot ishga tushganda bajariladigan amallar."""
-    # 1. DB jadvallarini yaratish (agar mavjud bo'lmasa)
-    await create_tables()
-    logger.info("DB jadvallari tayyor.")
-
-    # 2. Statik scheduler job'larini qo'shish (urush, bank, tribute, va h.k.)
-    setup_static_jobs(scheduler)
-
-    # 3. Farm jadvallarini DB dan yuklash va scheduler'ga qo'shish
-    await reload_farm_schedules(scheduler)
-
-    # 4. Schedulerni ishga tushirish
-    scheduler.start()
-    logger.info("Scheduler ishga tushdi.")
-
-    logger.info("Bot muvaffaqiyatli ishga tushdi! 🐺")
-
-
-async def on_shutdown(bot: Bot):
-    """Bot to'xtatilganda bajariladigan amallar."""
-    scheduler.shutdown(wait=False)
-    logger.info("Scheduler to'xtatildi.")
-
 
 async def main():
-    bot = Bot(
-        token=settings.BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
+    bot = Bot(token=settings.BOT_TOKEN)
+    storage = MemoryStorage()
+    dp = Dispatcher(storage=storage)
 
-    dp = Dispatcher()
+    # Middlewares
+    dp.message.middleware(LoggingMiddleware())
+    dp.message.middleware(AuthMiddleware())
+    dp.callback_query.middleware(AuthMiddleware())
 
-    # Startup / shutdown hooks
-    dp.startup.register(on_startup)
-    dp.shutdown.register(on_shutdown)
+    # Register all handlers
+    register_all_handlers(dp)
 
-    # Handlerlarni ro'yxatdan o'tkazish
-    dp.include_router(admin.router)
-    dp.include_router(start.router)
-    dp.include_router(profile.router)
-    dp.include_router(market.router)
-    dp.include_router(bank.router)
-    dp.include_router(war.router)
-    dp.include_router(war_ally.router)
-    dp.include_router(diplomacy.router)
-    dp.include_router(claim.router)
-    dp.include_router(rating.router)
-    dp.include_router(chat.router)
-    dp.include_router(chronicle.router)
+    # Create DB tables
+    await create_tables()
 
-    logger.info("Polling boshlandi...")
-    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    # Scheduler
+    scheduler = AsyncIOScheduler()
+    await setup_scheduler(scheduler, bot)
+    scheduler.start()
+
+    logger.info("Game of Thrones Bot V3 ishga tushdi!")
+    try:
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    finally:
+        scheduler.shutdown()
+        await bot.session.close()
 
 
 if __name__ == "__main__":
