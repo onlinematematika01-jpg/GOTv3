@@ -185,6 +185,7 @@ class IronBankLoan(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
+    house_id = Column(Integer, ForeignKey("houses.id"), nullable=True)  # qarz olgan xonadon
     principal = Column(BigInteger, nullable=False)
     interest_rate = Column(Float, nullable=False)
     total_due = Column(BigInteger, nullable=False)
