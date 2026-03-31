@@ -59,7 +59,11 @@ async def notify_allies(bot, war, house, side: str):
         if not alliances:
             return
 
-        enemy = war.defender if side == "attacker" else war.attacker
+        # enemy ni ID orqali yuklaymiz — lazy relationship ishlamaydi
+        enemy_house_id = war.defender_house_id if side == "attacker" else war.attacker_house_id
+        enemy = await house_repo.get_by_id(enemy_house_id)
+        if not enemy:
+            return
         role_text = "hujumchi" if side == "attacker" else "mudofaachi"
 
         for alliance in alliances:
