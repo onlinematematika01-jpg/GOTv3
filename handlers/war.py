@@ -30,9 +30,45 @@ def is_war_time() -> bool:
 
 
 def can_declare_war() -> bool:
+    """
+    Urush faqat 19:00–22:00 oralig'ida e'lon qilinishi mumkin.
+    Sababki: 1 soatlik grace period kafolatlanishi kerak.
+    22:01+ da e'lon qilinsa grace period 23:00 dan oshib ketadi → keyingi kunga qoladi.
+    Qat'iy: e'lon 22:00:00 gacha (22:00:59 oxirgi daqiqa).
+    """
     now = datetime.utcnow()
     local_hour = (now.hour + 5) % 24
-    return settings.WAR_START_HOUR <= local_hour < settings.WAR_DECLARE_DEADLINE
+    local_minute = now.minute
+    # 19:00 dan 22:00 gacha (22:00 qo'shiladi, 22:01 dan BOSHLAB bloklangan)
+    if local_hour < settings.WAR_START_HOUR:
+        return False
+    if local_hour > settings.WAR_DECLARE_DEADLINE:
+        return False
+    if local_hour == settings.WAR_DECLARE_DEADLINE and local_minute > 0:
+        # 22:01+ → bloklangan
+        return False
+    return True
+
+
+def get_war_declare_error_message() -> str:
+    """E'lon qilib bo'lmaydigan vaqtda aniq xato xabari"""
+    now = datetime.utcnow()
+    local_hour = (now.hour + 5) % 24
+    if local_hour < settings.WAR_START_HOUR:
+        return (
+            f"❌ Urush e'lon qilish vaqti emas!\n"
+            f"📅 Urush vaqti: 19:00 – 22:00\n"
+            f"⏰ Hozir: {local_hour:02d}:{now.minute:02d}"
+        )
+    else:
+        # 22:01+ yoki 23:00+
+        return (
+            f"❌ Urush e'lon qilish muddati o'tdi!\n\n"
+            f"🕙 Qat'iy qoida: urush faqat <b>22:00 gacha</b> e'lon qilinishi mumkin.\n"
+            f"📌 Sabab: mudofaachiga kamida 1 soat (grace period) kafolatlanishi shart.\n\n"
+            f"⏰ Hozir: {local_hour:02d}:{now.minute:02d}\n"
+            f"📅 Ertaga 19:00 dan boshlab e'lon qilishingiz mumkin."
+        )
 
 
 @router.message(F.text == "⚔️ Urush")
@@ -80,7 +116,8 @@ async def war_menu(message: Message):
 @router.callback_query(F.data == "war:declare")
 async def declare_war_start(callback: CallbackQuery, state: FSMContext):
     if not can_declare_war():
-        await callback.answer("❌ Urush e'lon qilish vaqti emas! (19:00–22:00)", show_alert=True)
+        error_msg = get_war_declare_error_message()
+        await callback.answer(error_msg, show_alert=True)
         return
 
     async with AsyncSessionFactory() as session:
@@ -144,6 +181,20 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
             return
 
         grace_ends = datetime.utcnow() + timedelta(minutes=settings.GRACE_PERIOD_MINUTES)
+
+        # Xavfsizlik: grace period har qanday holatda 23:00 (mahalliy) dan oshmasin
+        # UTC = mahalliy - 5 soat, ya'ni 23:00 mahalliy = 18:00 UTC
+        now = datetime.utcnow()
+        war_end_today_utc = now.replace(hour=18, minute=0, second=0, microsecond=0)
+        if war_end_today_utc <= now:
+            # 23:00 mahalliy allaqachon o'tgan — ertangi kunga o'tkazish mumkin emas,
+            # lekin can_declare_war() allaqachon buni bloklagan. Shu sababli bu yerga kelmasligimiz kerak.
+            await callback.answer("❌ Texnik xato: urush vaqti o'tib ketgan.", show_alert=True)
+            await state.clear()
+            return
+        if grace_ends > war_end_today_utc:
+            grace_ends = war_end_today_utc
+
         war = await war_repo.create_war(attacker_house_id, target_house_id, grace_ends)
 
         user = await user_repo.get_by_id(callback.from_user.id)
@@ -174,6 +225,17 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
                 )
             except Exception as e:
                 logger.warning(f"Mudofaachiga xabar yuborishda xato: {e}")
+
+    # Ikkala tomon ittifoqchilariga xabar — session yopilgandan keyin
+    from handlers.war_ally import notify_allies
+    try:
+        await notify_allies(bot, war, attacker, "attacker")
+    except Exception as e:
+        logger.warning(f"Hujumchi ittifoqchilariga xabar yuborishda xato: {e}")
+    try:
+        await notify_allies(bot, war, defender, "defender")
+    except Exception as e:
+        logger.warning(f"Mudofaachi ittifoqchilariga xabar yuborishda xato: {e}")
 
     await state.clear()
     await callback.answer()
