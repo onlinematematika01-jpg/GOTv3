@@ -169,10 +169,11 @@ class WarAllySupport(Base):
     war_id = Column(Integer, ForeignKey("wars.id"), nullable=False)
     ally_house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
     side = Column(String(16), nullable=False)      # "attacker" | "defender"
-    join_type = Column(String(16), nullable=False) # "full" | "soldiers"
+    join_type = Column(String(16), nullable=False) # "full" | "soldiers" | "gold"
     soldiers = Column(Integer, default=0)
     dragons = Column(Integer, default=0)
     scorpions = Column(Integer, default=0)
+    gold = Column(BigInteger, default=0)           # yuborilgan oltin miqdori
     created_at = Column(DateTime, server_default=func.now())
 
     war = relationship("War", foreign_keys=[war_id])
