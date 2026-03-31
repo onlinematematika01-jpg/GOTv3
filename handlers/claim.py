@@ -234,7 +234,7 @@ async def claim_reject(callback: CallbackQuery):
         from database.models import War
         await session.execute(
             update(War).where(War.id == war.id).values(
-                war_type=WarTypeEnum.CIVIL,
+                war_type=WarTypeEnum.CIVIL.value,
                 claim_id=claim_id,
             )
         )
@@ -328,7 +328,7 @@ async def check_claim_wars_ended(bot, session):
         result = await session.execute(
             select(War).where(
                 War.claim_id == claim.id,
-                War.war_type == WarTypeEnum.CIVIL,
+                War.war_type == WarTypeEnum.CIVIL.value,
             )
         )
         wars = result.scalars().all()
