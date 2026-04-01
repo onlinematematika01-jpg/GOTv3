@@ -46,6 +46,11 @@ async def create_tables():
         "wars", "claim_id",
         "ALTER TABLE wars ADD COLUMN claim_id INTEGER REFERENCES hukmdor_claims(id) ON DELETE SET NULL"
     )
+    await _migrate_add_column(
+        "houses", "vassal_since",
+        "ALTER TABLE houses ADD COLUMN vassal_since TIMESTAMP"
+    )
+    await _migrate_backfill_vassal_since()
 
     logger.info("Database jadvallari va migratsiyalar tayyor")
     await _seed_market_prices()
@@ -80,6 +85,28 @@ async def _migrate_add_column(table: str, column: str, sql: str):
                 logger.warning(f"Migration xatosi ({table}.{column}): {e}")
         else:
             logger.info(f"Migration: {table}.{column} allaqachon mavjud")
+
+
+async def _migrate_backfill_vassal_since():
+    """
+    Eski vassallar: is_under_occupation=True lekin vassal_since=NULL bo'lganlar.
+    Ular isyon qila olishlari uchun vassal_since ni 3 kun oldin deb belgilaymiz
+    (ya'ni ertaga o'lpon to'lab, keyin isyon ocha oladi).
+    """
+    async with engine.begin() as conn:
+        result = await conn.execute(text(
+            "SELECT COUNT(*) FROM houses "
+            "WHERE is_under_occupation = TRUE AND vassal_since IS NULL"
+        ))
+        count = result.scalar()
+        if count and count > 0:
+            await conn.execute(text(
+                "UPDATE houses SET vassal_since = NOW() - INTERVAL '3 days' "
+                "WHERE is_under_occupation = TRUE AND vassal_since IS NULL"
+            ))
+            logger.info(f"Migration: {count} ta eski vassal xonadon vassal_since tuzatildi")
+        else:
+            logger.info("Migration: backfill kerak emas")
 
 
 async def _migrate_drop_region_unique(conn):
