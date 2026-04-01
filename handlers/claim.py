@@ -54,6 +54,25 @@ async def start_claim(message: Message):
             await message.answer("❌ Xonadon yoki hududingiz aniqlanmagan.")
             return
 
+        my_house = await house_repo.get_by_id(user.house_id)
+        if not my_house:
+            await message.answer("❌ Xonadoningiz topilmadi.")
+            return
+
+        # Vassal bo'lsa — isyon qoidasi tekshiriladi
+        if my_house.is_under_occupation and my_house.vassal_since:
+            days_as_vassal = (datetime.utcnow() - my_house.vassal_since).days
+            if days_as_vassal < 2:
+                remaining = 2 - days_as_vassal
+                await message.answer(
+                    f"⛓️ <b>Isyon uchun vaqt kelgani yo'q!</b>\n\n"
+                    f"Siz vassal bo'lganingizga <b>{days_as_vassal}</b> kun bo'ldi.\n"
+                    f"Isyon qilish uchun kamida <b>2 kun</b> o'tishi kerak.\n"
+                    f"⏳ Yana <b>{remaining}</b> kun kutishingiz lozim.",
+                    parse_mode="HTML"
+                )
+                return
+
         # Hududda faqat 1 ta xonadon bo'lsa — da'vo ma'nosiz
         same_region_houses = await house_repo.get_all_by_region(user.region)
         other_houses = [h for h in same_region_houses if h.id != user.house_id]
@@ -81,7 +100,6 @@ async def start_claim(message: Message):
         await session.commit()
 
         # Boshqa xonadon lordlariga xabar
-        my_house = await house_repo.get_by_id(user.house_id)
         notified = 0
         for house in other_houses:
             if house.lord_id:
@@ -155,6 +173,9 @@ async def claim_accept(callback: CallbackQuery):
         )
         claim = result.scalar_one_or_none()
         claimant = await house_repo.get_by_id(claim.claimant_house_id)
+
+        # Vassal holatini o'rnatish — o'lpon tizimi uchun
+        await house_repo.set_occupation(user.house_id, claimant.id, tax_rate=0.0)
 
         await callback.answer("✅ Qabul qildingiz — vassal bo'ldingiz!")
         await callback.message.edit_text(
@@ -338,27 +359,44 @@ async def check_claim_wars_ended(bot, session):
             continue  # Hali tugamagan urushlar bor
 
         # Barcha urushlar tugadi — g'olibni hisoblash
-        # Da'vogar barcha urushlarni yutdimi?
-        claimant_lost = any(
-            w.winner_house_id != claim.claimant_house_id
-            for w in wars if w.status == WarStatusEnum.ENDED
+        # Da'vogar BARCHA urushlarni yutgan bo'lsa u HIGH_LORD
+        # Agar da'vogar hech bo'lmasa bitta urushda yutqazsa —
+        # uni mag'lub qilgan xonadon g'olib
+        ended_wars = [w for w in wars if w.status == WarStatusEnum.ENDED]
+        if not ended_wars:
+            continue
+
+        claimant_won_all = all(
+            w.winner_house_id == claim.claimant_house_id
+            for w in ended_wars
         )
 
-        if claimant_lost:
-            # Da'vogar yutqazdi — g'olib uni mag'lub qilgan xonadon
-            # Oxirgi da'vogarni yutgan xonadonni topamiz
+        if claimant_won_all:
+            winner_id = claim.claimant_house_id
+        else:
+            # Da'vogar yutqazgan urushni topamiz
+            # G'olib — da'vogarni mag'lub qilgan xonadon
             winner_id = None
-            for w in wars:
+            for w in ended_wars:
                 if w.winner_house_id != claim.claimant_house_id:
                     winner_id = w.winner_house_id
                     break
-        else:
-            winner_id = claim.claimant_house_id
 
         await claim_repo.set_status(claim.id, ClaimStatusEnum.COMPLETED)
 
         if winner_id:
             await claim_repo.resolve_hukmdor(claim.region, winner_id, bot)
+
+            # Mag'lub bo'lgan barcha xonadonlarni vassal qilish
+            for w in ended_wars:
+                loser_id = (
+                    w.defender_house_id
+                    if w.winner_house_id == w.attacker_house_id
+                    else w.attacker_house_id
+                )
+                if loser_id != winner_id:
+                    await house_repo.set_occupation(loser_id, winner_id, tax_rate=0.0)
+
             winner = await house_repo.get_by_id(winner_id)
             from utils.chronicle import post_to_chronicle
             text = (
