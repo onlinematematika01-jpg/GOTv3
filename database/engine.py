@@ -51,6 +51,7 @@ async def create_tables():
         "ALTER TABLE houses ADD COLUMN vassal_since TIMESTAMP"
     )
     await _migrate_backfill_vassal_since()
+    await _migrate_close_stale_claims()
 
     logger.info("Database jadvallari va migratsiyalar tayyor")
     await _seed_market_prices()
@@ -85,6 +86,32 @@ async def _migrate_add_column(table: str, column: str, sql: str):
                 logger.warning(f"Migration xatosi ({table}.{column}): {e}")
         else:
             logger.info(f"Migration: {table}.{column} allaqachon mavjud")
+
+
+async def _migrate_close_stale_claims():
+    """
+    Eski da'volar: barcha bog'liq urushlar tugagan lekin da'vo hali PENDING/IN_PROGRESS.
+    Bunday da'volarni COMPLETED ga o'tkazamiz — yangi da'vo ochish imkoni berish uchun.
+    """
+    async with engine.begin() as conn:
+        result = await conn.execute(text("""
+            UPDATE hukmdor_claims
+            SET status = 'completed', resolved_at = NOW()
+            WHERE status IN ('pending', 'in_progress')
+              AND (
+                  -- Bog'liq faol urush yo'q
+                  NOT EXISTS (
+                      SELECT 1 FROM wars
+                      WHERE wars.claim_id = hukmdor_claims.id
+                        AND wars.status NOT IN ('ended')
+                  )
+              )
+        """))
+        count = result.rowcount
+        if count:
+            logger.info(f"Migration: {count} ta yetim da'vo COMPLETED qilindi")
+        else:
+            logger.info("Migration: yetim da'vo yo'q")
 
 
 async def _migrate_backfill_vassal_since():
