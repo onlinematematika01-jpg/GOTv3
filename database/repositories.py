@@ -348,6 +348,88 @@ class IronBankRepo:
         await self.session.commit()
         return {"success": True, "paid": actual, "remaining": new_debt}
 
+    async def get_all_active_loans(self) -> list:
+        """Admin uchun — barcha to'lanmagan qarzlar"""
+        result = await self.session.execute(
+            select(IronBankLoan)
+            .where(IronBankLoan.paid == False)
+            .order_by(IronBankLoan.due_date)
+        )
+        return result.scalars().all()
+
+    async def extend_due_date(self, house_id: int, days: int):
+        """Qarz muddatini uzaytirish"""
+        from datetime import timedelta
+        await self.session.execute(
+            update(IronBankLoan).where(
+                IronBankLoan.house_id == house_id,
+                IronBankLoan.paid == False,
+            ).values(due_date=IronBankLoan.due_date + timedelta(days=days))
+        )
+        await self.session.commit()
+
+    async def forgive_debt(self, house_id: int):
+        """Qarzni to'liq kechirish"""
+        await self.session.execute(
+            update(IronBankLoan).where(
+                IronBankLoan.house_id == house_id,
+                IronBankLoan.paid == False,
+            ).values(paid=True)
+        )
+        await self.session.execute(
+            update(User).where(User.house_id == house_id).values(debt=0)
+        )
+        await self.session.commit()
+
+    async def confiscate_partial(self, house_id: int, confiscate: dict) -> int:
+        """
+        Qisman musodara — admin tanlagan resurslarni olib qarz qoplamasiga hisoblaydi.
+        confiscate = {soldiers, dragons, scorpions, gold} — nechta olinsin
+        Qaytaradi: hisoblangan qoplama miqdori
+        """
+        from config.settings import settings as cfg
+        # Qiymat hisoblash
+        value = (
+            confiscate.get("soldiers", 0) * cfg.SOLDIER_PRICE +
+            confiscate.get("dragons", 0) * cfg.DRAGON_PRICE +
+            confiscate.get("scorpions", 0) * cfg.SCORPION_PRICE +
+            confiscate.get("gold", 0)
+        )
+        if value <= 0:
+            return 0
+
+        # Resurslarni ayirish
+        await self.session.execute(
+            update(House).where(House.id == house_id).values(
+                total_soldiers=func.greatest(House.total_soldiers - confiscate.get("soldiers", 0), 0),
+                total_dragons=func.greatest(House.total_dragons - confiscate.get("dragons", 0), 0),
+                total_scorpions=func.greatest(House.total_scorpions - confiscate.get("scorpions", 0), 0),
+                treasury=func.greatest(House.treasury - confiscate.get("gold", 0), 0),
+            )
+        )
+        # Qarz kamaytirish
+        result = await self.session.execute(
+            select(User).where(
+                User.house_id == house_id,
+                User.role.in_([RoleEnum.LORD, RoleEnum.HIGH_LORD])
+            )
+        )
+        lord = result.scalars().first()
+        if lord:
+            new_debt = max(0, lord.debt - value)
+            await self.session.execute(
+                update(User).where(User.id == lord.id).values(debt=new_debt)
+            )
+            if new_debt == 0:
+                await self.session.execute(
+                    update(IronBankLoan).where(
+                        IronBankLoan.house_id == house_id,
+                        IronBankLoan.paid == False,
+                    ).values(paid=True)
+                )
+        await self.session.commit()
+        return value
+
     async def confiscate_for_debt(self, user: User):
         """Qarz to'lanmasa — xonadon qo'shin va ajdarlari musodara"""
         if not user.house_id:
