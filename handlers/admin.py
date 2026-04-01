@@ -36,6 +36,9 @@ class AdminState(StatesGroup):
     # Farm jadvali
     waiting_farm_time = State()
     waiting_farm_amount = State()
+    # Qarzdorlar boshqaruvi
+    waiting_debt_extend_days = State()
+    waiting_debt_confiscate = State()
 
 
 # ─── BANK LIMIT — runtime o'zgaruvchilar ───
@@ -716,5 +719,297 @@ async def admin_farm_del_confirm(callback: CallbackQuery):
     await callback.message.answer(
         f"✅ <b>{removed['hour']:02d}:{removed['minute']:02d} — {removed['amount']} tanga</b> o'chirildi.\n\n"
         f"{_fmt_schedules(schedules)}",
+        parse_mode="HTML"
+    )
+
+
+# ─── QARZDORLAR BOSHQARUVI ──────────────────────────────────────────────────
+
+from database.repositories import IronBankRepo
+from datetime import datetime, timezone as tz, timedelta as td
+
+
+def _fmt_loan_list(loans, houses: dict) -> str:
+    if not loans:
+        return "✅ Hozirda to'lanmagan qarz yo'q."
+    now = datetime.utcnow()
+    lines = []
+    for loan in loans:
+        house_name = houses.get(loan.house_id, f"Xonadon#{loan.house_id}")
+        due = loan.due_date
+        if due:
+            delta = due - now
+            overdue = delta.total_seconds() < 0
+            due_local = (due + td(hours=5)).strftime("%d.%m %H:%M")
+            status = "🔴 Muddati o'tgan" if overdue else f"⏳ {due_local} gacha"
+        else:
+            status = "❓ Muddat belgilanmagan"
+        lines.append(
+            f"🏰 <b>{house_name}</b>\n"
+            f"   💰 Qarz: {loan.total_due:,} tanga\n"
+            f"   {status}"
+        )
+    return "\n\n".join(lines)
+
+
+@router.callback_query(F.data == "admin:debtors")
+async def admin_debtors(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        iron_repo = IronBankRepo(session)
+        house_repo = HouseRepo(session)
+        loans = await iron_repo.get_all_active_loans()
+
+        houses = {}
+        for loan in loans:
+            if loan.house_id and loan.house_id not in houses:
+                h = await house_repo.get_by_id(loan.house_id)
+                houses[loan.house_id] = h.name if h else f"#{loan.house_id}"
+
+    if not loans:
+        await callback.answer()
+        await callback.message.answer(
+            "✅ Hozirda to'lanmagan qarz yo'q.",
+            reply_markup=back_only_keyboard("admin:back")
+        )
+        return
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    buttons = []
+    for loan in loans:
+        house_name = houses.get(loan.house_id, f"#{loan.house_id}")
+        buttons.append([InlineKeyboardButton(
+            text=f"🏰 {house_name} — {loan.total_due:,} tanga",
+            callback_data=f"admin:debt_detail:{loan.house_id}"
+        )])
+    buttons.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin:back")])
+
+    await callback.answer()
+    await callback.message.answer(
+        f"💸 <b>QARZDORLAR RO'YXATI</b>\n\n"
+        f"{_fmt_loan_list(loans, houses)}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("admin:debt_detail:"))
+async def admin_debt_detail(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    house_id = int(callback.data.split(":")[-1])
+
+    async with AsyncSessionFactory() as session:
+        house_repo = HouseRepo(session)
+        iron_repo = IronBankRepo(session)
+        house = await house_repo.get_by_id(house_id)
+        debt = await iron_repo.get_house_active_debt(house_id)
+
+    if not house:
+        await callback.answer("❌ Xonadon topilmadi.", show_alert=True)
+        return
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📅 Muddatni uzaytirish", callback_data=f"admin:debt_extend:{house_id}")],
+        [InlineKeyboardButton(text="⚔️ Resurs musodara qilish", callback_data=f"admin:debt_confiscate:{house_id}")],
+        [InlineKeyboardButton(text="🎁 Qarzni kechirish", callback_data=f"admin:debt_forgive:{house_id}")],
+        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin:debtors")],
+    ])
+
+    await callback.answer()
+    await callback.message.answer(
+        f"🏰 <b>{house.name}</b>\n\n"
+        f"💰 Xazina: {house.treasury:,} tanga\n"
+        f"🗡️ Askarlar: {house.total_soldiers:,}\n"
+        f"🐉 Ajdarlar: {house.total_dragons}\n"
+        f"🏹 Skorpionlar: {house.total_scorpions}\n\n"
+        f"🏦 <b>To'lanmagan qarz: {debt:,} tanga</b>\n\n"
+        f"Qanday chora ko'rmoqchisiz?",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("admin:debt_extend:"))
+async def admin_debt_extend_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    house_id = int(callback.data.split(":")[-1])
+    await state.set_state(AdminState.waiting_debt_extend_days)
+    await state.update_data(debt_house_id=house_id)
+    await callback.answer()
+    await callback.message.answer(
+        "📅 <b>Necha kun uzaytirmoqchisiz?</b>\n"
+        "Masalan: <code>3</code> yoki <code>7</code>",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_debt_extend_days)
+async def admin_debt_extend_confirm(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        days = int(message.text.strip())
+        if days <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Musbat son kiriting.")
+        return
+
+    data = await state.get_data()
+    house_id = data["debt_house_id"]
+
+    async with AsyncSessionFactory() as session:
+        iron_repo = IronBankRepo(session)
+        house_repo = HouseRepo(session)
+        await iron_repo.extend_due_date(house_id, days)
+        house = await house_repo.get_by_id(house_id)
+        # Lordga xabar
+        if house and house.lord_id:
+            try:
+                await message.bot.send_message(
+                    house.lord_id,
+                    f"🏦 <b>Temir Bank xabari</b>\n\n"
+                    f"Qarzingiz muddati <b>{days} kun</b> uzaytirildi.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+    await state.clear()
+    await message.answer(
+        f"✅ <b>{days} kun</b> uzaytirildi.",
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("admin:debt_confiscate:"))
+async def admin_debt_confiscate_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    house_id = int(callback.data.split(":")[-1])
+
+    async with AsyncSessionFactory() as session:
+        house_repo = HouseRepo(session)
+        iron_repo = IronBankRepo(session)
+        house = await house_repo.get_by_id(house_id)
+        debt = await iron_repo.get_house_active_debt(house_id)
+
+    await state.set_state(AdminState.waiting_debt_confiscate)
+    await state.update_data(debt_house_id=house_id)
+    await callback.answer()
+    await callback.message.answer(
+        f"⚔️ <b>Resurs musodara — {house.name}</b>\n\n"
+        f"Joriy resurslar:\n"
+        f"🗡️ Askarlar: {house.total_soldiers:,}\n"
+        f"🐉 Ajdarlar: {house.total_dragons}\n"
+        f"🏹 Skorpionlar: {house.total_scorpions}\n"
+        f"💰 Xazina: {house.treasury:,}\n\n"
+        f"🏦 Qarz: {debt:,} tanga\n\n"
+        f"Quyidagi formatda kiriting:\n"
+        f"<code>askar:500 ajdar:2 skorpion:10 oltin:1000</code>\n"
+        f"(Kerak bo'lmagan turni o'tkazib yuboring)",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_debt_confiscate)
+async def admin_debt_confiscate_confirm(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+
+    data = await state.get_data()
+    house_id = data["debt_house_id"]
+
+    confiscate = {"soldiers": 0, "dragons": 0, "scorpions": 0, "gold": 0}
+    key_map = {"askar": "soldiers", "ajdar": "dragons", "skorpion": "scorpions", "oltin": "gold"}
+
+    try:
+        for part in message.text.strip().split():
+            if ":" in part:
+                k, v = part.split(":", 1)
+                if k in key_map:
+                    confiscate[key_map[k]] = int(v)
+    except Exception:
+        await message.answer("❌ Format noto'g'ri. Masalan: <code>askar:500 ajdar:2</code>", parse_mode="HTML")
+        return
+
+    if all(v == 0 for v in confiscate.values()):
+        await message.answer("❌ Hech narsa tanlanmadi.")
+        return
+
+    async with AsyncSessionFactory() as session:
+        iron_repo = IronBankRepo(session)
+        house_repo = HouseRepo(session)
+        value = await iron_repo.confiscate_partial(house_id, confiscate)
+        house = await house_repo.get_by_id(house_id)
+        remaining = await iron_repo.get_house_active_debt(house_id)
+
+        if house and house.lord_id:
+            parts = []
+            if confiscate["soldiers"]: parts.append(f"🗡️ {confiscate['soldiers']} askar")
+            if confiscate["dragons"]: parts.append(f"🐉 {confiscate['dragons']} ajdar")
+            if confiscate["scorpions"]: parts.append(f"🏹 {confiscate['scorpions']} skorpion")
+            if confiscate["gold"]: parts.append(f"💰 {confiscate['gold']} tanga")
+            try:
+                await message.bot.send_message(
+                    house.lord_id,
+                    f"🏦 <b>Temir Bank musodara qildi!</b>\n\n"
+                    f"Qarz undirish maqsadida:\n" + "\n".join(parts) +
+                    f"\n\n💸 Qoplandi: {value:,} tanga\n"
+                    f"🏦 Qolgan qarz: {remaining:,} tanga",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+    await state.clear()
+    await message.answer(
+        f"✅ <b>Musodara bajarildi</b>\n\n"
+        f"💸 Qoplandi: {value:,} tanga\n"
+        f"🏦 Qolgan qarz: {remaining:,} tanga",
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("admin:debt_forgive:"))
+async def admin_debt_forgive(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    house_id = int(callback.data.split(":")[-1])
+
+    async with AsyncSessionFactory() as session:
+        iron_repo = IronBankRepo(session)
+        house_repo = HouseRepo(session)
+        house = await house_repo.get_by_id(house_id)
+        await iron_repo.forgive_debt(house_id)
+
+        if house and house.lord_id:
+            try:
+                await callback.bot.send_message(
+                    house.lord_id,
+                    f"🏦 <b>Temir Bank xabari</b>\n\n"
+                    f"Xonadoningizning barcha qarzlari kechirildi! 🎉",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+    await callback.answer()
+    await callback.message.answer(
+        f"✅ <b>{house.name}</b> xonadonining qarzi kechirildi.",
         parse_mode="HTML"
     )
