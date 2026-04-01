@@ -331,13 +331,22 @@ class IronBankRepo:
                 treasury=House.treasury - actual,
             )
         )
+        new_debt = user.debt - actual
         await self.session.execute(
             update(User).where(User.id == user.id).values(
-                debt=User.debt - actual,
+                debt=new_debt,
             )
         )
+        # Qarz to'liq to'langan bo'lsa — IronBankLoan ni paid=True qilish
+        if new_debt <= 0:
+            await self.session.execute(
+                update(IronBankLoan).where(
+                    IronBankLoan.house_id == house_id,
+                    IronBankLoan.paid == False,
+                ).values(paid=True)
+            )
         await self.session.commit()
-        return {"success": True, "paid": actual, "remaining": user.debt - actual}
+        return {"success": True, "paid": actual, "remaining": new_debt}
 
     async def confiscate_for_debt(self, user: User):
         """Qarz to'lanmasa — xonadon qo'shin va ajdarlari musodara"""
@@ -356,6 +365,13 @@ class IronBankRepo:
                 dragons=0,
                 debt=0,
             )
+        )
+        # Qarzlarni yopish
+        await self.session.execute(
+            update(IronBankLoan).where(
+                IronBankLoan.house_id == user.house_id,
+                IronBankLoan.paid == False,
+            ).values(paid=True)
         )
         await self.session.commit()
 
