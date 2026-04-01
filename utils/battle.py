@@ -129,11 +129,10 @@ def calculate_battle(
     remaining_att_dragons = att_dragons
     while remaining_att_dragons > 0 and def_soldiers > 0:
         if def_soldiers > settings.DRAGON_KILLS_SOLDIERS:
-            # 201+ askar: ajdar o'ladi, 200 askar o'ladi
-            def_soldiers -= settings.DRAGON_KILLS_SOLDIERS
+            # 201+ askar: ajdar o'ladi, askarlar TO'LIQ saqlanadi
             remaining_att_dragons -= 1
             r2_log.append(
-                f"🐉 Hujumchi ajdari {settings.DRAGON_KILLS_SOLDIERS} askar o'ldirdi, halok bo'ldi "
+                f"🐉 Hujumchi ajdari halok bo'ldi, mudofaachi askarlari saqlanib qoldi "
                 f"({def_soldiers} mudofaachi askari qoldi)"
             )
         else:
@@ -151,10 +150,10 @@ def calculate_battle(
     remaining_def_dragons = def_dragons
     while remaining_def_dragons > 0 and att_soldiers > 0:
         if att_soldiers > settings.DRAGON_KILLS_SOLDIERS:
-            att_soldiers -= settings.DRAGON_KILLS_SOLDIERS
+            # 201+ askar: ajdar o'ladi, askarlar TO'LIQ saqlanadi
             remaining_def_dragons -= 1
             r2_log.append(
-                f"🐉 Mudofaachi ajdari {settings.DRAGON_KILLS_SOLDIERS} askar o'ldirdi, halok bo'ldi "
+                f"🐉 Mudofaachi ajdari halok bo'ldi, hujumchi askarlari saqlanib qoldi "
                 f"({att_soldiers} hujumchi askari qoldi)"
             )
         else:
@@ -240,12 +239,15 @@ def calculate_battle(
     att_total_start = attacker_house.total_soldiers + sum(a.soldiers for a in attacker_allies)
     def_total_start = defender_house.total_soldiers + sum(a.soldiers for a in defender_allies)
 
+    att_dragons_start = attacker_house.total_dragons + sum(a.dragons for a in attacker_allies)
+    def_dragons_start = defender_house.total_dragons + sum(a.dragons for a in defender_allies)
+
     att_soldiers_lost  = max(0, att_total_start - att_soldiers)
-    att_dragons_lost   = max(0, attacker_house.total_dragons - att_dragons)
+    att_dragons_lost   = max(0, att_dragons_start - att_dragons)
     att_scorpions_lost = attacker_house.total_scorpions
 
     def_soldiers_lost  = max(0, def_total_start - def_soldiers)
-    def_dragons_lost   = max(0, defender_house.total_dragons - def_dragons)
+    def_dragons_lost   = max(0, def_dragons_start - def_dragons)
     def_scorpions_lost = defender_house.total_scorpions
 
     # Ittifoqchi yo'qotmalari
