@@ -5,7 +5,7 @@ from database.engine import AsyncSessionFactory
 from database.repositories import UserRepo, HouseRepo, WarRepo, IronBankRepo, ChronicleRepo
 from database.models import RoleEnum, WarStatusEnum
 from sqlalchemy import select, update
-from database.models import User
+from database.models import User, House
 import logging
 from datetime import datetime, timedelta
 
@@ -52,20 +52,33 @@ async def daily_farm_job(bot: Bot, scheduled_amount: int = 0):
         for house_id, total in house_farm.items():
             await house_repo.update_treasury(house_id, total)
 
-        # O'lpon: vassal xonadoni Hukmdor xonadoniga 100 tanga/a'zo
+        # O'lpon: vassal (bosib olingan) xonadon Hukmdor xonadoniga 100 tanga/a'zo to'laydi
         all_houses = await house_repo.get_all()
         for house in all_houses:
-            if house.lord_id and house.high_lord_id:
-                member_count = await user_repo.count_house_members(house.id)
-                tribute = 100 * member_count
-                await house_repo.update_treasury(house.id, -tribute)
-                # Hukmdor xonadonini topib xazinasiga qo'shamiz
-                hl_result = await session.execute(
-                    select(User).where(User.id == house.high_lord_id)
-                )
-                hl_user = hl_result.scalar_one_or_none()
-                if hl_user and hl_user.house_id:
-                    await house_repo.update_treasury(hl_user.house_id, tribute)
+            if not house.is_under_occupation or not house.occupier_house_id:
+                continue
+            member_count = await user_repo.count_house_members(house.id)
+            tribute = 100 * member_count
+            # Vassaldan ayirish (xazina noldan pastga tushmasin)
+            result = await session.execute(
+                select(House).where(House.id == house.id)
+            )
+            h = result.scalar_one_or_none()
+            actual_tribute = min(tribute, h.treasury) if h else 0
+            if actual_tribute > 0:
+                await house_repo.update_treasury(house.id, -actual_tribute)
+                await house_repo.update_treasury(house.occupier_house_id, actual_tribute)
+                # Vassalning lordiga xabar
+                if h and h.lord_id:
+                    try:
+                        await bot.send_message(
+                            h.lord_id,
+                            f"💸 <b>O'lpon to'landi!</b>\n"
+                            f"-{actual_tribute} tanga hukmdor xonadoniga o'tkazildi.",
+                            parse_mode="HTML"
+                        )
+                    except Exception:
+                        pass
 
         # Referal hisoblagichni nollash
         await session.execute(update(User).values(referral_count_today=0))
@@ -194,6 +207,8 @@ async def _run_war(war, bot, session):
             soldiers=-result.defender_soldiers_lost,
             dragons=-result.defender_dragons_lost,
         )
+        # Defender vassal bo'ladi — o'lpon tizimi uchun
+        await house_repo.set_occupation(defender.id, attacker.id, tax_rate=0.10)
         await _handle_lord_succession(session, war, bot)
     else:
         await house_repo.update_treasury(defender.id, result.loot_gold)
