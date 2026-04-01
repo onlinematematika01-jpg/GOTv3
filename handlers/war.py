@@ -6,12 +6,13 @@ from aiogram.filters import Command
 from datetime import datetime, timedelta
 from database.engine import AsyncSessionFactory
 from database.repositories import UserRepo, HouseRepo, WarRepo, AllianceRepo, ChronicleRepo
-from database.models import RoleEnum, WarStatusEnum
+from database.models import RoleEnum, WarStatusEnum, WarAllySupport
 from keyboards import war_menu_keyboard, house_list_keyboard, surrender_or_fight_keyboard
 from utils.battle import calculate_battle, calculate_surrender_loot
 from utils.chronicle import post_to_chronicle, format_chronicle
 from config.settings import settings
-from sqlalchemy import update
+from sqlalchemy import update, select
+from sqlalchemy.orm import selectinload
 from database.models import User, House
 import logging
 
@@ -200,6 +201,43 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
         user = await user_repo.get_by_id(callback.from_user.id)
         if user and user.role == RoleEnum.HIGH_LORD:
             await alliance_repo.break_alliances_for_war(attacker_house_id)
+
+        # 2-QOIDA: yangi urush ochilganda — defender (target_house) boshqa urushda
+        # ittifoqchi sifatida ishtirok etayotgan bo'lsa, o'sha yordam bekor qilinadi
+        # va yordamni olgan tomon xabardor qilinadi
+        cancelled_supports = await session.execute(
+            select(WarAllySupport)
+            .where(WarAllySupport.ally_house_id == target_house_id)
+            .options(selectinload(WarAllySupport.war), selectinload(WarAllySupport.ally_house))
+        )
+        cancelled_list = cancelled_supports.scalars().all()
+        for sup in cancelled_list:
+            # Faqat hali faol urushlar uchun
+            if sup.war and sup.war.status in [WarStatusEnum.GRACE_PERIOD, WarStatusEnum.FIGHTING]:
+                # Beneficiary (yordamni olgan tomon) ni topish
+                beneficiary_house_id = (
+                    sup.war.attacker_house_id if sup.side == "attacker"
+                    else sup.war.defender_house_id
+                )
+                beneficiary = await house_repo.get_by_id(beneficiary_house_id)
+
+                # Yordamni o'chirish
+                await session.delete(sup)
+
+                # Beneficiaryga xabar
+                if beneficiary and beneficiary.lord_id:
+                    try:
+                        await callback.bot.send_message(
+                            beneficiary.lord_id,
+                            f"⚠️ <b>ITTIFOQCHI YORDAMI BEKOR QILINDI!</b>\n\n"
+                            f"<b>{defender.name}</b> xonadoniga urush e'lon qilindi!\n"
+                            f"Ular sizga bergan yordamlari avtomatik bekor bo'ldi.",
+                            parse_mode="HTML"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Beneficiaryga xabar yuborishda xato: {e}")
+
+        await session.commit()
 
         text = format_chronicle(
             "war_declared",
