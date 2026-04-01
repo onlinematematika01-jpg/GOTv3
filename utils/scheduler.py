@@ -53,29 +53,24 @@ async def daily_farm_job(bot: Bot, scheduled_amount: int = 0):
         for house_id, total in house_farm.items():
             await house_repo.update_treasury(house_id, total)
 
-        # O'lpon: vassal (bosib olingan) xonadon Hukmdor xonadoniga 100 tanga/a'zo to'laydi
+        # O'lpon: vassal xonadon xazinasining permanent_tax_rate % ini Hukmdorga to'laydi
         all_houses = await house_repo.get_all()
         for house in all_houses:
             if not house.is_under_occupation or not house.occupier_house_id:
                 continue
-            member_count = await user_repo.count_house_members(house.id)
-            tribute = 100 * member_count
-            # Vassaldan ayirish (xazina noldan pastga tushmasin)
-            result = await session.execute(
-                select(House).where(House.id == house.id)
-            )
-            h = result.scalar_one_or_none()
-            actual_tribute = min(tribute, h.treasury) if h else 0
+            tax_rate = house.permanent_tax_rate or 0.10
+            tribute = int(house.treasury * tax_rate)
+            actual_tribute = max(0, min(tribute, house.treasury))
             if actual_tribute > 0:
                 await house_repo.update_treasury(house.id, -actual_tribute)
                 await house_repo.update_treasury(house.occupier_house_id, actual_tribute)
                 # Vassalning lordiga xabar
-                if h and h.lord_id:
+                if house.lord_id:
                     try:
                         await bot.send_message(
-                            h.lord_id,
+                            house.lord_id,
                             f"💸 <b>O'lpon to'landi!</b>\n"
-                            f"-{actual_tribute} tanga hukmdor xonadoniga o'tkazildi.",
+                            f"-{actual_tribute} tanga ({int(tax_rate*100)}% soliq) hukmdor xonadoniga o'tkazildi.",
                             parse_mode="HTML"
                         )
                     except Exception:
