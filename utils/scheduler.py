@@ -43,11 +43,11 @@ async def daily_farm_job(bot: Bot, scheduled_amount: int = 0):
             if user.role == RoleEnum.ADMIN or not user.house_id:
                 continue
             if scheduled_amount > 0:
-                # Admin tomonidan belgilangan miqdor — hamma uchun bir xil
-                amount = scheduled_amount
+                # Admin tomonidan belgilangan miqdor — xonadonga fixed summa (a'zo sonidan qat'i nazar)
+                house_farm[user.house_id] = scheduled_amount
             else:
                 amount = 50 if user.role in [RoleEnum.HIGH_LORD, RoleEnum.LORD] else 20
-            house_farm[user.house_id] = house_farm.get(user.house_id, 0) + amount
+                house_farm[user.house_id] = house_farm.get(user.house_id, 0) + amount
 
         # Xazinalarga qo'shish
         for house_id, total in house_farm.items():
