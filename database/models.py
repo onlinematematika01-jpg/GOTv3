@@ -87,6 +87,7 @@ class House(Base):
     is_under_occupation = Column(Boolean, default=False)
     occupier_house_id = Column(Integer, ForeignKey("houses.id"), nullable=True)
     permanent_tax_rate = Column(Float, default=0.0)
+    vassal_since = Column(DateTime, nullable=True)  # Vassal bo'lgan sana — isyon sanasi hisoblash uchun
     created_at = Column(DateTime, server_default=func.now())
 
     members = relationship("User", back_populates="house", foreign_keys=[User.house_id])
