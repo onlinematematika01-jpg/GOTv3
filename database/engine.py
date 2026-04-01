@@ -96,12 +96,12 @@ async def _migrate_close_stale_claims():
     async with engine.begin() as conn:
         result = await conn.execute(text("""
             UPDATE hukmdor_claims
-            SET status = 'completed'::claimstatusenum, resolved_at = NOW()
-            WHERE status IN ('pending'::claimstatusenum, 'in_progress'::claimstatusenum)
+            SET status = 'completed', resolved_at = NOW()
+            WHERE status::text IN ('pending', 'in_progress')
               AND NOT EXISTS (
                   SELECT 1 FROM wars
                   WHERE wars.claim_id = hukmdor_claims.id
-                    AND wars.status != 'ended'::warstatusenum
+                    AND wars.status::text != 'ended'
               )
         """))
         count = result.rowcount
