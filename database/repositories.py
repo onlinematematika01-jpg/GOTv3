@@ -140,9 +140,9 @@ class HouseRepo:
     async def update_military(self, house_id: int, soldiers: int = 0, dragons: int = 0, scorpions: int = 0):
         await self.session.execute(
             update(House).where(House.id == house_id).values(
-                total_soldiers=House.total_soldiers + soldiers,
-                total_dragons=House.total_dragons + dragons,
-                total_scorpions=House.total_scorpions + scorpions,
+                total_soldiers=func.greatest(House.total_soldiers + soldiers, 0),
+                total_dragons=func.greatest(House.total_dragons + dragons, 0),
+                total_scorpions=func.greatest(House.total_scorpions + scorpions, 0),
             )
         )
         await self.session.commit()
