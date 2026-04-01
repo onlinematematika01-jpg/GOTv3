@@ -98,13 +98,10 @@ async def _migrate_close_stale_claims():
             UPDATE hukmdor_claims
             SET status = 'completed', resolved_at = NOW()
             WHERE status IN ('pending', 'in_progress')
-              AND (
-                  -- Bog'liq faol urush yo'q
-                  NOT EXISTS (
-                      SELECT 1 FROM wars
-                      WHERE wars.claim_id = hukmdor_claims.id
-                        AND wars.status NOT IN ('ended')
-                  )
+              AND NOT EXISTS (
+                  SELECT 1 FROM wars
+                  WHERE wars.claim_id = hukmdor_claims.id
+                    AND wars.status != 'ended'
               )
         """))
         count = result.rowcount
