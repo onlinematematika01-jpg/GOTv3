@@ -341,7 +341,7 @@ class IronBankRepo:
         if new_debt <= 0:
             await self.session.execute(
                 update(IronBankLoan).where(
-                    IronBankLoan.house_id == house_id,
+                    (IronBankLoan.house_id == house_id) | (IronBankLoan.user_id == user.id),
                     IronBankLoan.paid == False,
                 ).values(paid=True)
             )
@@ -349,13 +349,35 @@ class IronBankRepo:
         return {"success": True, "paid": actual, "remaining": new_debt}
 
     async def get_all_active_loans(self) -> list:
-        """Admin uchun — barcha to'lanmagan qarzlar"""
+        """Admin uchun — barcha to'lanmagan qarzlar (user.debt > 0 bo'lganlar)"""
         result = await self.session.execute(
             select(IronBankLoan)
-            .where(IronBankLoan.paid == False)
+            .join(User, User.id == IronBankLoan.user_id)
+            .where(
+                IronBankLoan.paid == False,
+                User.debt > 0,
+            )
             .order_by(IronBankLoan.due_date)
         )
-        return result.scalars().all()
+        loans = result.scalars().all()
+        # Eski to'langan qarzlarni DB da ham yopib qo'yamiz
+        paid_ids = []
+        result2 = await self.session.execute(
+            select(IronBankLoan)
+            .join(User, User.id == IronBankLoan.user_id)
+            .where(
+                IronBankLoan.paid == False,
+                User.debt <= 0,
+            )
+        )
+        stale = result2.scalars().all()
+        if stale:
+            stale_ids = [l.id for l in stale]
+            await self.session.execute(
+                update(IronBankLoan).where(IronBankLoan.id.in_(stale_ids)).values(paid=True)
+            )
+            await self.session.commit()
+        return loans
 
     async def extend_due_date(self, house_id: int, days: int):
         """Qarz muddatini uzaytirish"""
