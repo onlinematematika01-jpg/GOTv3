@@ -761,13 +761,28 @@ async def admin_debtors(callback: CallbackQuery):
     async with AsyncSessionFactory() as session:
         iron_repo = IronBankRepo(session)
         house_repo = HouseRepo(session)
+        user_repo = UserRepo(session)
         loans = await iron_repo.get_all_active_loans()
 
+        # house_id yo'q bo'lgan qarzlarda user orqali xonadoni topamiz
+        # va house_id ni DB da ham yangilaymiz
         houses = {}
         for loan in loans:
+            if not loan.house_id:
+                user = await user_repo.get_by_id(loan.user_id)
+                if user and user.house_id:
+                    # DB da ham yangilaymiz
+                    await session.execute(
+                        update(IronBankLoan).where(IronBankLoan.id == loan.id).values(house_id=user.house_id)
+                    )
+                    loan.house_id = user.house_id
+                    await session.commit()
             if loan.house_id and loan.house_id not in houses:
                 h = await house_repo.get_by_id(loan.house_id)
                 houses[loan.house_id] = h.name if h else f"#{loan.house_id}"
+
+    # house_id hali ham yo'q bo'lganlarni chiqarib tashlaymiz
+    loans = [l for l in loans if l.house_id]
 
     if not loans:
         await callback.answer()
@@ -779,7 +794,11 @@ async def admin_debtors(callback: CallbackQuery):
 
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     buttons = []
+    seen_houses = set()
     for loan in loans:
+        if loan.house_id in seen_houses:
+            continue
+        seen_houses.add(loan.house_id)
         house_name = houses.get(loan.house_id, f"#{loan.house_id}")
         buttons.append([InlineKeyboardButton(
             text=f"🏰 {house_name} — {loan.total_due:,} tanga",
