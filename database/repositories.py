@@ -148,11 +148,13 @@ class HouseRepo:
         await self.session.commit()
 
     async def set_occupation(self, house_id: int, occupier_id: int, tax_rate: float):
+        from datetime import datetime
         await self.session.execute(
             update(House).where(House.id == house_id).values(
                 is_under_occupation=True,
                 occupier_house_id=occupier_id,
                 permanent_tax_rate=tax_rate,
+                vassal_since=datetime.utcnow(),
             )
         )
         await self.session.commit()
