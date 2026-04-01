@@ -93,39 +93,35 @@ async def _migrate_close_stale_claims():
     Eski da'volar: barcha bog'liq urushlar tugagan lekin da'vo hali PENDING/IN_PROGRESS.
     Bunday da'volarni COMPLETED ga o'tkazamiz — yangi da'vo ochish imkoni berish uchun.
     """
-    async with engine.begin() as conn:
-        # Enum type nomini PostgreSQL dan dinamik olamiz
-        type_result = await conn.execute(text("""
-            SELECT pg_type.typname
-            FROM pg_type
-            WHERE pg_type.typname ILIKE '%claimstatus%'
-            LIMIT 1
-        """))
-        claim_type = type_result.scalar()
+    from sqlalchemy import update, and_, not_, exists, select
+    from sqlalchemy.orm import Session
+    from database.models import HukmdorClaim, War, ClaimStatusEnum, WarStatusEnum
 
-        war_type_result = await conn.execute(text("""
-            SELECT pg_type.typname
-            FROM pg_type
-            WHERE pg_type.typname ILIKE '%warstatus%'
-            LIMIT 1
-        """))
-        war_type = war_type_result.scalar()
+    async with AsyncSessionFactory() as session:
+        async with session.begin():
+            # Tugagan urushga ega bo'lmagan pending/in_progress da'volarni topamiz
+            war_subq = select(War.id).where(
+                and_(
+                    War.claim_id == HukmdorClaim.id,
+                    War.status != WarStatusEnum.ENDED
+                )
+            ).correlate(HukmdorClaim)
 
-        if claim_type and war_type:
-            result = await conn.execute(text(f"""
-                UPDATE hukmdor_claims
-                SET status = 'completed'::{claim_type}, resolved_at = NOW()
-                WHERE status::text IN ('pending', 'in_progress')
-                  AND NOT EXISTS (
-                      SELECT 1 FROM wars
-                      WHERE wars.claim_id = hukmdor_claims.id
-                        AND wars.status::text != 'ended'
-                  )
-            """))
+            stmt = (
+                update(HukmdorClaim)
+                .where(
+                    and_(
+                        HukmdorClaim.status.in_([
+                            ClaimStatusEnum.PENDING,
+                            ClaimStatusEnum.IN_PROGRESS
+                        ]),
+                        not_(exists(war_subq))
+                    )
+                )
+                .values(status=ClaimStatusEnum.COMPLETED)
+            )
+            result = await session.execute(stmt)
             count = result.rowcount
-        else:
-            logger.warning(f"Migration: enum type topilmadi (claim={claim_type}, war={war_type})")
-            count = 0
 
         if count:
             logger.info(f"Migration: {count} ta yetim da'vo COMPLETED qilindi")
