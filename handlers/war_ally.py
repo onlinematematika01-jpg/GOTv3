@@ -6,7 +6,7 @@ from aiogram.types import Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo, AllianceRepo
+from database.repositories import UserRepo, HouseRepo, AllianceRepo, WarRepo
 from database.models import RoleEnum, WarStatusEnum, WarAllySupport
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
@@ -50,10 +50,12 @@ async def notify_allies(bot, war, house, side: str):
     Xonadon ittifoqchilariga urush haqida xabar yuboradi
     va yordam so'rash tugmalarini ko'rsatadi.
     side = "attacker" | "defender"
+    Urushda bo'lgan ittifoqchilar o'tkazib yuboriladi.
     """
     async with AsyncSessionFactory() as session:
         alliance_repo = AllianceRepo(session)
         house_repo = HouseRepo(session)
+        war_repo = WarRepo(session)
 
         alliances = await alliance_repo.get_all_active_for_house(house.id)
         if not alliances:
@@ -80,6 +82,11 @@ async def notify_allies(bot, war, house, side: str):
                 )
             )
             if existing.scalar_one_or_none():
+                continue
+
+            # Ittifoqchi o'zi urushda bo'lsa — xabar ham yuborilmaydi
+            own_war = await war_repo.get_active_war(ally_id)
+            if own_war:
                 continue
 
             try:
@@ -124,6 +131,16 @@ async def ally_join_full(callback: CallbackQuery):
 
         if not war or war.status not in [WarStatusEnum.GRACE_PERIOD, WarStatusEnum.FIGHTING]:
             await callback.answer("❌ Bu urush allaqachon tugagan.", show_alert=True)
+            return
+
+        # C xonadon o'zi urushda bo'lsa — yordamga qo'shila olmaydi
+        war_repo_check = WarRepo(session)
+        own_war = await war_repo_check.get_active_war(user.house_id)
+        if own_war and own_war.id != war_id:
+            await callback.answer(
+                "❌ Siz hozir urushda bo'lganlgiz uchun ittifoqchingizga yordam bera olmaysiz.",
+                show_alert=True
+            )
             return
 
         # Allaqachon qo'shilganmi
@@ -265,6 +282,16 @@ async def ally_send_soldiers_confirm(message: Message, state: FSMContext):
             await state.clear()
             return
 
+        # C xonadon o'zi urushda bo'lsa — yordamga qo'shila olmaydi
+        war_repo_check = WarRepo(session)
+        own_war = await war_repo_check.get_active_war(user.house_id)
+        if own_war and own_war.id != war_id:
+            await message.answer(
+                "❌ Siz hozir urushda bo'lganlgiz uchun ittifoqchingizga yordam bera olmaysiz."
+            )
+            await state.clear()
+            return
+
         # Ittifoq buzilishi tekshiruvi
         enemy_house_id = war.attacker_house_id if side == "defender" else war.defender_house_id
         enemy_alliance = await alliance_repo.get_active(user.house_id, enemy_house_id)
@@ -390,6 +417,16 @@ async def ally_send_gold_confirm(message: Message, state: FSMContext):
 
         if not war or war.status not in [WarStatusEnum.GRACE_PERIOD, WarStatusEnum.FIGHTING]:
             await message.answer("❌ Bu urush allaqachon tugagan.")
+            await state.clear()
+            return
+
+        # C xonadon o'zi urushda bo'lsa — yordamga qo'shila olmaydi
+        war_repo_check = WarRepo(session)
+        own_war = await war_repo_check.get_active_war(user.house_id)
+        if own_war and own_war.id != war_id:
+            await message.answer(
+                "❌ Siz hozir urushda bo'lganlgiz uchun ittifoqchingizga yordam bera olmaysiz."
+            )
             await state.clear()
             return
 
