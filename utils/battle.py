@@ -81,6 +81,30 @@ def calculate_battle(
         log.append("🤝 Mudofaachi ittifoqchilari: " + ", ".join(a.house_name for a in defender_allies))
 
     # ═══════════════════════════════════════
+    # QAL'A MUDOFAASI — Roundlardan oldin
+    # ═══════════════════════════════════════
+    castle_defense = getattr(defender_house, 'castle_defense', 0) or 0
+    castle_triggered = False
+
+    if castle_defense > 0:
+        log.append(f"\n🏰 <b>QAL'A MUDOFAASI FAOLLASHDI!</b>\nMudofaa balli: {castle_defense} | Hujumchi ajdarlari: {att_dragons}")
+        if castle_defense > att_dragons:
+            # Qal'a hujumchining barcha resurslarini yarmilashtiradi
+            att_soldiers  = math.ceil(att_soldiers  / 2)
+            att_dragons   = math.ceil(att_dragons   / 2)
+            att_scorpions = math.ceil(att_scorpions / 2)
+            castle_triggered = True
+            log.append(
+                f"🏰 Qal'a mudofaa balli ({castle_defense}) hujumchi ajdarlaridan ({att_dragons*2}) ko'p!\n"
+                f"💥 Hujumchining barcha resurslari yarimlandi:\n"
+                f"🔴 {attacker_house.name}: {att_soldiers} askar | {att_dragons} ajdar | {att_scorpions} skorpion"
+            )
+            # Qal'a bir marta ishlatiladi — ballni nolga tushirish
+            defender_house.castle_defense = 0
+        else:
+            log.append(f"🏰 Qal'a mudofaasi yetarli emas (mudofaa {castle_defense} ≤ ajdar {att_dragons}) — ta'sir yo'q")
+
+    # ═══════════════════════════════════════
     # ROUND 1 — Ajdar vs Skorpion
     # ═══════════════════════════════════════
     r1_log = ["", "🔥 <b>1-ROUND: AJDAR vs SKORPION</b>"]
@@ -129,14 +153,15 @@ def calculate_battle(
     remaining_att_dragons = att_dragons
     while remaining_att_dragons > 0 and def_soldiers > 0:
         if def_soldiers > settings.DRAGON_KILLS_SOLDIERS:
-            # 201+ askar: ajdar o'ladi, askarlar TO'LIQ saqlanadi
+            # 201+ askar: ajdar o'ladi, 200 askar o'ladi, qolganlar keyingi ajdarga qarshi
+            def_soldiers -= settings.DRAGON_KILLS_SOLDIERS
             remaining_att_dragons -= 1
             r2_log.append(
-                f"🐉 Hujumchi ajdari halok bo'ldi, mudofaachi askarlari saqlanib qoldi "
+                f"🐉 Hujumchi ajdari {settings.DRAGON_KILLS_SOLDIERS} askar o'ldirdi, halok bo'ldi "
                 f"({def_soldiers} mudofaachi askari qoldi)"
             )
         else:
-            # <=200 askar: ajdar TIRIK, askarning yarmi o'ladi
+            # <=200 askar: ajdar TIRIK qoladi, askarning yarmi o'ladi, loop to'xtaydi
             half = math.ceil(def_soldiers / 2)
             def_soldiers -= half
             r2_log.append(
@@ -150,13 +175,15 @@ def calculate_battle(
     remaining_def_dragons = def_dragons
     while remaining_def_dragons > 0 and att_soldiers > 0:
         if att_soldiers > settings.DRAGON_KILLS_SOLDIERS:
-            # 201+ askar: ajdar o'ladi, askarlar TO'LIQ saqlanadi
+            # 201+ askar: ajdar o'ladi, 200 askar o'ladi, qolganlar keyingi ajdarga qarshi
+            att_soldiers -= settings.DRAGON_KILLS_SOLDIERS
             remaining_def_dragons -= 1
             r2_log.append(
-                f"🐉 Mudofaachi ajdari halok bo'ldi, hujumchi askarlari saqlanib qoldi "
+                f"🐉 Mudofaachi ajdari {settings.DRAGON_KILLS_SOLDIERS} askar o'ldirdi, halok bo'ldi "
                 f"({att_soldiers} hujumchi askari qoldi)"
             )
         else:
+            # <=200 askar: ajdar TIRIK qoladi, askarning yarmi o'ladi, loop to'xtaydi
             half = math.ceil(att_soldiers / 2)
             att_soldiers -= half
             r2_log.append(
