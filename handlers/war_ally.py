@@ -52,12 +52,25 @@ async def notify_allies(bot, war, house, side: str):
     side = "attacker" | "defender"
     Urushda bo'lgan ittifoqchilar o'tkazib yuboriladi.
     """
+    # house detach bo'lgan bo'lishi mumkin — id ni oldindan olamiz
+    house_id = house.id if hasattr(house, 'id') else house
+    war_id = war.id
+    war_attacker_id = war.attacker_house_id
+    war_defender_id = war.defender_house_id
+
     async with AsyncSessionFactory() as session:
         alliance_repo = AllianceRepo(session)
         house_repo = HouseRepo(session)
         war_repo = WarRepo(session)
 
-        alliances = await alliance_repo.get_all_active_for_house(house.id)
+        # war obyektini yangi session orqali yuklaymiz
+        from sqlalchemy import select as _select
+        war_result = await session.execute(_select(War).where(War.id == war_id))
+        war = war_result.scalar_one_or_none()
+        if not war:
+            return
+
+        alliances = await alliance_repo.get_all_active_for_house(house_id)
         if not alliances:
             return
 
@@ -69,7 +82,7 @@ async def notify_allies(bot, war, house, side: str):
         role_text = "hujumchi" if side == "attacker" else "mudofaachi"
 
         for alliance in alliances:
-            ally_id = alliance.house2_id if alliance.house1_id == house.id else alliance.house1_id
+            ally_id = alliance.house2_id if alliance.house1_id == house_id else alliance.house1_id
             ally_house = await house_repo.get_by_id(ally_id)
             if not ally_house or not ally_house.lord_id:
                 continue
