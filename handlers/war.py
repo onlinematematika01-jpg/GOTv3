@@ -199,8 +199,6 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
         war = await war_repo.create_war(attacker_house_id, target_house_id, grace_ends)
 
         user = await user_repo.get_by_id(callback.from_user.id)
-        if user and user.role == RoleEnum.HIGH_LORD:
-            await alliance_repo.break_alliances_for_war(attacker_house_id)
 
         # 2-QOIDA: yangi urush ochilganda — defender (target_house) boshqa urushda
         # ittifoqchi sifatida ishtirok etayotgan bo'lsa, o'sha yordam bekor qilinadi
