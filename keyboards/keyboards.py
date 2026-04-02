@@ -101,6 +101,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="🏦 Bank Limiti", callback_data="admin:bank_limits")
     builder.button(text="🌾 Farm Jadvali", callback_data="admin:farm_schedule")
     builder.button(text="💸 Qarzdorlar", callback_data="admin:debtors")
+    builder.button(text="⚔️ Urush Seanslar", callback_data="admin:war_sessions")
     builder.button(text="🔀 A'zo Ko'chirish", callback_data="admin:transfer_member")
     builder.button(text="🗑 Bazani Tozalash", callback_data="admin:reset_db")
     builder.adjust(2)
