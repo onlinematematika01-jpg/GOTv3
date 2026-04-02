@@ -577,6 +577,20 @@ class BotSettingsRepo:
         import json
         await self.set("farm_schedules", json.dumps(schedules))
 
+    async def get_war_sessions(self) -> list[dict]:
+        """Urush seanslarini olish: [{"start": 19, "end": 23, "declare_deadline": 22}, ...]"""        import json
+        raw = await self.get("war_sessions")
+        if not raw:
+            return [{"start": 19, "end": 23, "declare_deadline": 22}]
+        try:
+            return json.loads(raw)
+        except Exception:
+            return [{"start": 19, "end": 23, "declare_deadline": 22}]
+
+    async def set_war_sessions(self, sessions: list[dict]):
+        import json
+        await self.set("war_sessions", json.dumps(sessions))
+
 
 class HukmdorClaimRepo:
     def __init__(self, session: AsyncSession):
@@ -758,18 +772,3 @@ class RatingRepo:
             .limit(limit)
         )
         return result.all()
-
-    async def get_war_sessions(self) -> list[dict]:
-        """Urush seanslarini olish: [{"start": 19, "end": 23, "declare_deadline": 22}, ...]"""
-        import json
-        raw = await self.get("war_sessions")
-        if not raw:
-            return [{"start": 19, "end": 23, "declare_deadline": 22}]
-        try:
-            return json.loads(raw)
-        except Exception:
-            return [{"start": 19, "end": 23, "declare_deadline": 22}]
-
-    async def set_war_sessions(self, sessions: list[dict]):
-        import json
-        await self.set("war_sessions", json.dumps(sessions))
