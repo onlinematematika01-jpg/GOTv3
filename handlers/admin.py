@@ -40,6 +40,9 @@ class AdminState(StatesGroup):
     # Qarzdorlar boshqaruvi
     waiting_debt_extend_days = State()
     waiting_debt_confiscate = State()
+    # Urush seanslar
+    waiting_war_session_start = State()
+    waiting_war_session_end = State()
 
 
 # ─── BANK LIMIT — runtime o'zgaruvchilar ───
@@ -1222,3 +1225,165 @@ async def admin_transfer_execute(callback: CallbackQuery, state: FSMContext):
 
     await state.clear()
     await callback.answer()
+
+
+# ─── URUSH SEANSLAR ────────────────────────────────────────────────────────
+
+def _fmt_war_sessions(sessions: list[dict]) -> str:
+    if not sessions:
+        return "⚔️ <b>Urush Seanslar</b>\n\nHech qanday seans yo'q."
+    lines = ["⚔️ <b>Urush Seanslar</b>\n"]
+    for i, s in enumerate(sessions, 1):
+        deadline = s.get("declare_deadline", s["end"] - 1)
+        lines.append(f"{i}. 🕐 {s['start']:02d}:00 – {s['end']:02d}:00  (e'lon: {s['start']:02d}:00–{deadline:02d}:00)")
+    return "\n".join(lines)
+
+
+@router.callback_query(F.data == "admin:war_sessions")
+async def admin_war_sessions(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        sessions = await cfg.get_war_sessions()
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Seans qo'shish", callback_data="admin:war_session_add")],
+        [InlineKeyboardButton(text="🗑 Seans o'chirish", callback_data="admin:war_session_delete")],
+        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin:back")],
+    ])
+    await callback.answer()
+    await callback.message.answer(
+        _fmt_war_sessions(sessions) + "\n\nNima qilmoqchisiz?",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "admin:war_session_add")
+async def admin_war_session_add(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    await state.set_state(AdminState.waiting_war_session_start)
+    await callback.answer()
+    await callback.message.answer(
+        "⚔️ <b>Yangi urush seansi</b>\n\n"
+        "Boshlanish vaqtini kiriting (soat, 0–23):\n"
+        "Masalan: <code>19</code>",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_war_session_start)
+async def admin_war_session_start(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        hour = int(message.text.strip())
+        if not (0 <= hour <= 23):
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ 0 dan 23 gacha raqam kiriting.")
+        return
+
+    await state.update_data(war_start=hour)
+    await state.set_state(AdminState.waiting_war_session_end)
+    await message.answer(
+        f"✅ Boshlanish: <b>{hour:02d}:00</b>\n\n"
+        f"Tugash vaqtini kiriting (soat, {hour+1}–23):\n"
+        f"Masalan: <code>23</code>",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_war_session_end)
+async def admin_war_session_end(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    war_start = data["war_start"]
+
+    try:
+        hour = int(message.text.strip())
+        if not (war_start < hour <= 23):
+            raise ValueError
+    except ValueError:
+        await message.answer(f"❌ {war_start+1} dan 23 gacha raqam kiriting.")
+        return
+
+    declare_deadline = hour - 1  # E'lon qilish oxirgi soati (tugashdan 1 soat oldin)
+
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        sessions = await cfg.get_war_sessions()
+        sessions.append({
+            "start": war_start,
+            "end": hour,
+            "declare_deadline": declare_deadline
+        })
+        await cfg.set_war_sessions(sessions)
+
+    await state.clear()
+    await message.answer(
+        f"✅ <b>Urush seansi qo'shildi!</b>\n\n"
+        f"🕐 {war_start:02d}:00 – {hour:02d}:00\n"
+        f"E'lon qilish: {war_start:02d}:00 – {declare_deadline:02d}:00",
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "admin:war_session_delete")
+async def admin_war_session_delete(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        sessions = await cfg.get_war_sessions()
+
+    if not sessions:
+        await callback.answer("Seanslar yo'q.", show_alert=True)
+        return
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    buttons = [
+        [InlineKeyboardButton(
+            text=f"🗑 {s['start']:02d}:00–{s['end']:02d}:00",
+            callback_data=f"admin:war_session_del:{i}"
+        )]
+        for i, s in enumerate(sessions)
+    ]
+    buttons.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin:war_sessions")])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await callback.answer()
+    await callback.message.answer("Qaysi seansi o'chirmoqchisiz?", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("admin:war_session_del:"))
+async def admin_war_session_del_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    idx = int(callback.data.split(":")[-1])
+
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        sessions = await cfg.get_war_sessions()
+        if idx < 0 or idx >= len(sessions):
+            await callback.answer("❌ Seans topilmadi.", show_alert=True)
+            return
+        removed = sessions.pop(idx)
+        await cfg.set_war_sessions(sessions)
+
+    await callback.answer()
+    await callback.message.answer(
+        f"✅ Seans o'chirildi: <b>{removed['start']:02d}:00 – {removed['end']:02d}:00</b>",
+        parse_mode="HTML"
+    )
