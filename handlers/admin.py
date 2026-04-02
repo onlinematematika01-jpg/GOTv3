@@ -1,6 +1,7 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
+from aiogram.filters import StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command
 from database.engine import AsyncSessionFactory
@@ -1032,3 +1033,192 @@ async def admin_debt_forgive(callback: CallbackQuery):
         f"✅ <b>{house.name}</b> xonadonining qarzi kechirildi.",
         parse_mode="HTML"
     )
+
+
+# ─── A'ZO KO'CHIRISH ───────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "admin:transfer_member")
+async def admin_transfer_start(callback: CallbackQuery, state: FSMContext):
+    """A'zo ko'chirish — avval foydalanuvchi ID so'raydi"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    await state.set_state("transfer_user_id")
+    await callback.message.answer(
+        "🔀 <b>A'zo Ko'chirish</b>\n\n"
+        "Ko'chirmoqchi bo'lgan foydalanuvchining Telegram ID sini kiriting:",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(StateFilter("transfer_user_id"))
+async def admin_transfer_get_user(message: Message, state: FSMContext):
+    """Foydalanuvchi ID ni oladi va xonadonlar ro'yxatini ko'rsatadi"""
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        user_id = int(message.text.strip())
+    except ValueError:
+        await message.answer("❌ Noto'g'ri ID. Raqam kiriting.")
+        return
+
+    async with AsyncSessionFactory() as session:
+        user_repo = UserRepo(session)
+        house_repo = HouseRepo(session)
+        user = await user_repo.get_by_id(user_id)
+
+        if not user:
+            await message.answer("❌ Bu ID li foydalanuvchi topilmadi.")
+            return
+        if not user.house_id:
+            await message.answer("❌ Bu foydalanuvchi hech bir xonadonda emas.")
+            return
+
+        current_house = await house_repo.get_by_id(user.house_id)
+        all_houses = await house_repo.get_all()
+        other_houses = [h for h in all_houses if h.id != user.house_id]
+
+        if not other_houses:
+            await message.answer("❌ Ko'chirish uchun boshqa xonadon yo'q.")
+            return
+
+        await state.update_data(transfer_user_id=user_id)
+        await state.set_state("transfer_house_id")
+
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        buttons = [
+            [InlineKeyboardButton(
+                text=f"🏰 {h.name} ({h.region.value})",
+                callback_data=f"transfer_to:{h.id}"
+            )]
+            for h in other_houses
+        ]
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+        await message.answer(
+            f"👤 <b>{user.full_name}</b>\n"
+            f"Hozirgi xonadon: <b>{current_house.name if current_house else '—'}</b>\n"
+            f"Roli: <b>{user.role.value}</b>\n\n"
+            f"Qaysi xonadonga ko'chirish kerak?",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+
+
+@router.callback_query(F.data.startswith("transfer_to:"))
+async def admin_transfer_execute(callback: CallbackQuery, state: FSMContext):
+    """Ko'chirishni amalga oshiradi + auto-lord mexanikasi"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    data = await state.get_data()
+    user_id = data.get("transfer_user_id")
+    target_house_id = int(callback.data.split(":")[1])
+
+    async with AsyncSessionFactory() as session:
+        from sqlalchemy import select as sa_select, update as sa_update
+        user_repo = UserRepo(session)
+        house_repo = HouseRepo(session)
+
+        user = await user_repo.get_by_id(user_id)
+        if not user:
+            await callback.answer("❌ Foydalanuvchi topilmadi.", show_alert=True)
+            return
+
+        old_house_id = user.house_id
+        old_house = await house_repo.get_by_id(old_house_id) if old_house_id else None
+        target_house = await house_repo.get_by_id(target_house_id)
+
+        if not target_house:
+            await callback.answer("❌ Xonadon topilmadi.", show_alert=True)
+            return
+
+        was_lord = (user.role in [RoleEnum.LORD, RoleEnum.HIGH_LORD] and
+                    old_house and old_house.lord_id == user.id)
+
+        # ═══ ESKI UYDA AUTO-LORD ═══
+        auto_promoted_name = None
+        if was_lord and old_house:
+            # Lordni uydan chiqaramiz
+            await session.execute(
+                sa_update(House).where(House.id == old_house_id).values(lord_id=None)
+            )
+            await session.flush()
+
+            # Eski uyda qolgan birinchi a'zoni lord qilamiz
+            members_result = await session.execute(
+                sa_select(User).where(
+                    User.house_id == old_house_id,
+                    User.id != user_id,
+                    User.is_active == True,
+                    User.role != RoleEnum.ADMIN
+                ).order_by(User.id)
+            )
+            remaining = members_result.scalars().first()
+            if remaining:
+                await session.execute(
+                    sa_update(User).where(User.id == remaining.id).values(role=RoleEnum.LORD)
+                )
+                await session.execute(
+                    sa_update(House).where(House.id == old_house_id).values(lord_id=remaining.id)
+                )
+                auto_promoted_name = remaining.full_name
+                # Yangi lordga xabar
+                try:
+                    await callback.bot.send_message(
+                        remaining.id,
+                        f"👑 <b>Siz {old_house.name} xonadonining yangi Lordi bo'ldingiz!</b>\n\n"
+                        f"Admin tomonidan ko'chirish natijasida avvalgi lord ketdi.",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+
+        # ═══ YANGI UYGA KO'CHIRISH ═══
+        # Yangi uyda lord bormi?
+        new_role = RoleEnum.LORD if not target_house.lord_id else RoleEnum.MEMBER
+
+        await session.execute(
+            sa_update(User).where(User.id == user_id).values(
+                house_id=target_house_id,
+                region=target_house.region,
+                role=new_role
+            )
+        )
+        if new_role == RoleEnum.LORD:
+            await session.execute(
+                sa_update(House).where(House.id == target_house_id).values(lord_id=user_id)
+            )
+
+        await session.commit()
+
+        # Natija xabari
+        result_text = (
+            f"✅ <b>Ko'chirish amalga oshirildi!</b>\n\n"
+            f"👤 {user.full_name}\n"
+            f"🏠 {old_house.name if old_house else '—'} → {target_house.name}\n"
+            f"👑 Yangi roli: <b>{new_role.value}</b>\n"
+        )
+        if auto_promoted_name:
+            result_text += f"\n🔄 <b>{old_house.name}</b> da yangi lord: <b>{auto_promoted_name}</b>"
+        elif was_lord and old_house:
+            result_text += f"\n⚠️ <b>{old_house.name}</b> da lord yo'q (a'zo qolmadi)"
+
+        await callback.message.answer(result_text, parse_mode="HTML")
+
+        # Ko'chirilgan foydalanuvchiga xabar
+        try:
+            await callback.bot.send_message(
+                user_id,
+                f"🔀 <b>Siz boshqa xonadonga ko'childingiz!</b>\n\n"
+                f"🏰 Yangi xonadon: <b>{target_house.name}</b>\n"
+                f"👑 Rolingiz: <b>{new_role.value}</b>",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+
+    await state.clear()
+    await callback.answer()
