@@ -24,29 +24,58 @@ class WarState(StatesGroup):
     selecting_target = State()
 
 
+async def get_war_sessions_from_db() -> list[dict]:
+    """DB dan urush seanslarini oladi"""
+    from database.repositories import BotSettingsRepo
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        return await cfg.get_war_sessions()
+
+
+async def is_war_time_async() -> bool:
+    now = datetime.utcnow()
+    local_hour = (now.hour + 5) % 24
+    sessions = await get_war_sessions_from_db()
+    return any(s["start"] <= local_hour < s["end"] for s in sessions)
+
+
 def is_war_time() -> bool:
     now = datetime.utcnow()
     local_hour = (now.hour + 5) % 24
     return settings.WAR_START_HOUR <= local_hour < settings.WAR_END_HOUR
 
 
+async def can_declare_war_async() -> bool:
+    """Urush e'lon qilish mumkinmi — DB dan seanslarni tekshiradi"""
+    now = datetime.utcnow()
+    local_hour = (now.hour + 5) % 24
+    local_minute = now.minute
+    sessions = await get_war_sessions_from_db()
+    for s in sessions:
+        deadline = s.get("declare_deadline", s["end"] - 1)
+        if local_hour < s["start"]:
+            continue
+        if local_hour > deadline:
+            continue
+        if local_hour == deadline and local_minute > 0:
+            continue
+        return True
+    return False
+
+
 def can_declare_war() -> bool:
     """
     Urush faqat 19:00–22:00 oralig'ida e'lon qilinishi mumkin.
     Sababki: 1 soatlik grace period kafolatlanishi kerak.
-    22:01+ da e'lon qilinsa grace period 23:00 dan oshib ketadi → keyingi kunga qoladi.
-    Qat'iy: e'lon 22:00:00 gacha (22:00:59 oxirgi daqiqa).
     """
     now = datetime.utcnow()
     local_hour = (now.hour + 5) % 24
     local_minute = now.minute
-    # 19:00 dan 22:00 gacha (22:00 qo'shiladi, 22:01 dan BOSHLAB bloklangan)
     if local_hour < settings.WAR_START_HOUR:
         return False
     if local_hour > settings.WAR_DECLARE_DEADLINE:
         return False
     if local_hour == settings.WAR_DECLARE_DEADLINE and local_minute > 0:
-        # 22:01+ → bloklangan
         return False
     return True
 
@@ -88,7 +117,8 @@ async def war_menu(message: Message):
         if user.house_id:
             active_war = await war_repo.get_active_war(user.house_id)
 
-        war_time_text = "✅ Urush vaqti" if is_war_time() else "❌ Urush vaqti emas (19:00–23:00)"
+        war_time_ok = await is_war_time_async()
+        war_time_text = "✅ Urush vaqti" if war_time_ok else "❌ Urush vaqti emas"
 
         text = (
             "⚔️ <b>URUSH MARKAZI</b>\n\n"
@@ -116,7 +146,7 @@ async def war_menu(message: Message):
 
 @router.callback_query(F.data == "war:declare")
 async def declare_war_start(callback: CallbackQuery, state: FSMContext):
-    if not can_declare_war():
+    if not await can_declare_war_async():
         error_msg = get_war_declare_error_message()
         await callback.answer(error_msg, show_alert=True)
         return
