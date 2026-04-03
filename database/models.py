@@ -237,3 +237,51 @@ class BotSettings(Base):
     key = Column(String(64), primary_key=True)
     value = Column(String(256), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class ItemTypeEnum(str, enum.Enum):
+    ATTACK = "attack"    # Hujum (ajdar kabi)
+    DEFENSE = "defense"  # Mudofaa (chayon kabi)
+    SOLDIER = "soldier"  # Askar kabi (hujum + askar kuchi)
+
+
+class CustomItem(Base):
+    """Admin tomonidan qo'shilgan maxsus qurol/birliklar"""
+    __tablename__ = "custom_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(64), nullable=False, unique=True)       # Nomi (masalan: "Ballista")
+    emoji = Column(String(8), nullable=False, default="⚔️")      # Emoji belgisi
+    item_type = Column(Enum(ItemTypeEnum), nullable=False)       # Turi
+    # Kuch ko'rsatkichlari
+    attack_power = Column(Integer, default=0)   # 1 ta bu item nechta askarga teng (hujum)
+    defense_power = Column(Integer, default=0)  # 1 ta bu item nechta chayonga qarshi tura oladi
+    price = Column(Integer, nullable=False)     # Narxi (tanga)
+    is_active = Column(Boolean, default=True)   # Sotuvda bormi
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class UserCustomItem(Base):
+    """Foydalanuvchining maxsus itemlari"""
+    __tablename__ = "user_custom_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
+    item_id = Column(Integer, ForeignKey("custom_items.id"), nullable=False)
+    quantity = Column(Integer, default=0)
+
+    user = relationship("User")
+    item = relationship("CustomItem")
+
+
+class HouseCustomItem(Base):
+    """Xonadonning maxsus itemlari (umumiy hisobi)"""
+    __tablename__ = "house_custom_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
+    item_id = Column(Integer, ForeignKey("custom_items.id"), nullable=False)
+    quantity = Column(Integer, default=0)
+
+    house = relationship("House")
+    item = relationship("CustomItem")
