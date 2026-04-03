@@ -580,6 +580,35 @@ class BotSettingsRepo:
         import json
         await self.set("farm_schedules", json.dumps(schedules))
 
+    async def get_war_sessions(self) -> list[dict]:
+        """
+        Urush seanslarini olish.
+        Format: [{"start": 19, "end": 23, "declare_deadline": 22}, ...]
+        DB da yo'q bo'lsa — settings dan default qaytaradi.
+        """
+        import json
+        from config.settings import settings as cfg
+        raw = await self.get("war_sessions")
+        if not raw:
+            return [{
+                "start": cfg.WAR_START_HOUR,
+                "end": cfg.WAR_END_HOUR,
+                "declare_deadline": cfg.WAR_DECLARE_DEADLINE,
+            }]
+        try:
+            return json.loads(raw)
+        except Exception:
+            return [{
+                "start": cfg.WAR_START_HOUR,
+                "end": cfg.WAR_END_HOUR,
+                "declare_deadline": cfg.WAR_DECLARE_DEADLINE,
+            }]
+
+    async def set_war_sessions(self, sessions: list[dict]):
+        """Urush seanslarini saqlash"""
+        import json
+        await self.set("war_sessions", json.dumps(sessions))
+
 
 class HukmdorClaimRepo:
     def __init__(self, session: AsyncSession):
