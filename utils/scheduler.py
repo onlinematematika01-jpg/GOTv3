@@ -6,7 +6,6 @@ from database.repositories import UserRepo, HouseRepo, WarRepo, IronBankRepo, Ch
 from database.models import RoleEnum, WarStatusEnum
 from sqlalchemy import select, update
 from database.models import User, House
-from config.settings import settings
 import logging
 from datetime import datetime, timedelta
 
@@ -43,34 +42,39 @@ async def daily_farm_job(bot: Bot, scheduled_amount: int = 0):
             if user.role == RoleEnum.ADMIN or not user.house_id:
                 continue
             if scheduled_amount > 0:
-                # Admin tomonidan belgilangan miqdor — xonadonga fixed summa (a'zo sonidan qat'i nazar)
-                house_farm[user.house_id] = scheduled_amount
+                # Admin tomonidan belgilangan miqdor — hamma uchun bir xil
+                amount = scheduled_amount
             else:
                 amount = 50 if user.role in [RoleEnum.HIGH_LORD, RoleEnum.LORD] else 20
-                house_farm[user.house_id] = house_farm.get(user.house_id, 0) + amount
+            house_farm[user.house_id] = house_farm.get(user.house_id, 0) + amount
 
         # Xazinalarga qo'shish
         for house_id, total in house_farm.items():
             await house_repo.update_treasury(house_id, total)
 
-        # O'lpon: vassal xonadon xazinasining permanent_tax_rate % ini Hukmdorga to'laydi
+        # O'lpon: vassal (bosib olingan) xonadon Hukmdor xonadoniga 100 tanga/a'zo to'laydi
         all_houses = await house_repo.get_all()
         for house in all_houses:
             if not house.is_under_occupation or not house.occupier_house_id:
                 continue
-            tax_rate = house.permanent_tax_rate or 0.10
-            tribute = int(house.treasury * tax_rate)
-            actual_tribute = max(0, min(tribute, house.treasury))
+            member_count = await user_repo.count_house_members(house.id)
+            tribute = 100 * member_count
+            # Vassaldan ayirish (xazina noldan pastga tushmasin)
+            result = await session.execute(
+                select(House).where(House.id == house.id)
+            )
+            h = result.scalar_one_or_none()
+            actual_tribute = min(tribute, h.treasury) if h else 0
             if actual_tribute > 0:
                 await house_repo.update_treasury(house.id, -actual_tribute)
                 await house_repo.update_treasury(house.occupier_house_id, actual_tribute)
                 # Vassalning lordiga xabar
-                if house.lord_id:
+                if h and h.lord_id:
                     try:
                         await bot.send_message(
-                            house.lord_id,
+                            h.lord_id,
                             f"💸 <b>O'lpon to'landi!</b>\n"
-                            f"-{actual_tribute} tanga ({int(tax_rate*100)}% soliq) hukmdor xonadoniga o'tkazildi.",
+                            f"-{actual_tribute} tanga hukmdor xonadoniga o'tkazildi.",
                             parse_mode="HTML"
                         )
                     except Exception:
@@ -495,8 +499,8 @@ async def check_civil_wars_job(bot: Bot):
 
 
 async def check_claim_timeouts_job(bot: Bot):
-    """1 soat ichida javob bermagan xonadonlarni rad etilgan deb belgilash va urush boshlash"""
-    from database.models import HukmdorClaim, HukmdorClaimResponse, ClaimStatusEnum, WarTypeEnum
+    """1 soat ichida javob bermagan xonadonlarga avtomatik urush boshlash"""
+    from database.models import HukmdorClaim, ClaimStatusEnum, WarTypeEnum
     from database.repositories import HukmdorClaimRepo, HouseRepo, WarRepo
     from sqlalchemy import select
     from datetime import datetime, timedelta
@@ -506,32 +510,32 @@ async def check_claim_timeouts_job(bot: Bot):
         house_repo = HouseRepo(session)
         war_repo = WarRepo(session)
 
-        # Faol PENDING da'volar
-        result = await session.execute(
-            select(HukmdorClaim).where(
-                HukmdorClaim.status == ClaimStatusEnum.PENDING,
-            )
-        )
-        claims = result.scalars().all()
-
         now = datetime.utcnow()
-        local_hour = (now.hour + 5) % 24
-        war_possible = settings.WAR_START_HOUR <= local_hour < settings.WAR_DECLARE_DEADLINE
 
-        for claim in claims:
-            # 1 soatdan oshgan da'vo
+        # PENDING da'volar — 1 soat o'tgan, javob bermaganlarni rad etib urush boshlash
+        result = await session.execute(
+            select(HukmdorClaim).where(HukmdorClaim.status == ClaimStatusEnum.PENDING)
+        )
+        pending_claims = result.scalars().all()
+
+        for claim in pending_claims:
             if (now - claim.created_at).total_seconds() < 3600:
                 continue
 
             responses = await claim_repo.get_all_responses(claim.id)
             claimant = await house_repo.get_by_id(claim.claimant_house_id)
+            has_rejection = False
 
             for resp in responses:
-                if resp.accepted is not None:
+                if resp.accepted is True:
+                    continue
+                if resp.accepted is False:
+                    has_rejection = True
                     continue
 
-                # Javob bermagan — rad etilgan deb hisoblanadi
+                # Javob bermagan — avtomatik rad
                 await claim_repo.set_response(claim.id, resp.house_id, accepted=False)
+                has_rejection = True
                 defender = await house_repo.get_by_id(resp.house_id)
 
                 if defender and defender.lord_id:
@@ -540,26 +544,42 @@ async def check_claim_timeouts_job(bot: Bot):
                             defender.lord_id,
                             f"⏰ <b>Muddati o'tdi!</b>\n\n"
                             f"<b>{claimant.name}</b> xonadonining hukmdorlik da'vosiga "
-                            f"javob bermaganligi sababli rad etildi.\n"
-                            f"{'⚔️ Urush boshlanmoqda!' if war_possible else '⚔️ Urush vaqtida boshlanadi.'}",
+                            f"javob bermaganligi sababli urush boshlanmoqda!",
                             parse_mode="HTML"
                         )
                     except Exception:
                         pass
 
-                if war_possible:
-                    active = await war_repo.get_active_war(resp.house_id)
-                    if not active:
-                        grace_ends = now + timedelta(minutes=settings.GRACE_PERIOD_MINUTES)
-                        war = await war_repo.create_war(claimant.id, resp.house_id, grace_ends)
-                        from sqlalchemy import update
-                        from database.models import War
-                        await session.execute(
-                            update(War).where(War.id == war.id).values(
-                                war_type=WarTypeEnum.CIVIL.value,
-                                claim_id=claim.id,
-                            )
+                # Civil urush darhol — vaqtga bog'liq emas
+                active = await war_repo.get_active_war(resp.house_id)
+                if not active:
+                    grace_ends = now + timedelta(minutes=settings.GRACE_PERIOD_MINUTES)
+                    war = await war_repo.create_war(claimant.id, resp.house_id, grace_ends)
+                    from sqlalchemy import update
+                    from database.models import War
+                    await session.execute(
+                        update(War).where(War.id == war.id).values(
+                            war_type=WarTypeEnum.CIVIL.value,
+                            claim_id=claim.id,
                         )
-                        await session.commit()
+                    )
+                    if claimant and claimant.lord_id:
+                        try:
+                            await bot.send_message(
+                                claimant.lord_id,
+                                f"⚔️ <b>{defender.name if defender else '?'}</b> javob bermadi — "
+                                f"urush boshlanmoqda!\n"
+                                f"Grace Period: {settings.GRACE_PERIOD_MINUTES} daqiqa",
+                                parse_mode="HTML"
+                            )
+                        except Exception:
+                            pass
 
-            await claim_repo.set_status(claim.id, ClaimStatusEnum.IN_PROGRESS)
+            if has_rejection:
+                await claim_repo.set_status(claim.id, ClaimStatusEnum.IN_PROGRESS)
+            else:
+                # Hamma qabul qildi
+                await claim_repo.set_status(claim.id, ClaimStatusEnum.COMPLETED)
+                await claim_repo.resolve_hukmdor(claim.region, claim.claimant_house_id, bot)
+
+            await session.commit()
