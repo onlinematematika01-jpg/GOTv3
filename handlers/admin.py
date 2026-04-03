@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import StateFilter
 from aiogram.fsm.state import State, StatesGroup
@@ -1639,7 +1639,7 @@ async def item_list(callback: CallbackQuery):
             callback_data=f"admin:item:info:{item.id}"
         )])
 
-    from aiogram.types import InlineKeyboardMarkup
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:custom_items")])
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
