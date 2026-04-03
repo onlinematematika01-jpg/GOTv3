@@ -1,7 +1,7 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from database.engine import AsyncSessionFactory
-from database.repositories import RatingRepo
+from database.repositories import RatingRepo, CustomItemRepo
 from keyboards import rating_menu_keyboard
 
 router = Router()
@@ -29,12 +29,38 @@ async def rating_power(callback: CallbackQuery):
         repo = RatingRepo(session)
         rows = await repo.get_power_ranking()
 
+        # Har xonadon uchun custom item kuchlarini hisoblash
+        item_repo = CustomItemRepo(session)
+        house_item_power: dict[int, dict] = {}
+        for row in rows:
+            items = await item_repo.get_house_items_with_info(row.id)
+            extra_attack = sum(r.item.attack_power * r.quantity for r in items)
+            extra_defense = sum(r.item.defense_power * r.quantity for r in items)
+            house_item_power[row.id] = {"attack": extra_attack, "defense": extra_defense, "items": items}
+
     lines = ["⚡ <b>UMUMIY KUCH REYTINGI</b>\n"]
-    for i, row in enumerate(rows):
-        power = row.total_soldiers + row.total_dragons * 200 + row.total_scorpions * 25
+    house_powers = []
+    for row in rows:
+        base_power = row.total_soldiers + row.total_dragons * 200 + row.total_scorpions * 25
+        item_atk = house_item_power[row.id]["attack"]
+        item_def = house_item_power[row.id]["defense"]
+        total_power = base_power + item_atk + item_def
+        house_powers.append((row, total_power, item_atk, item_def, house_item_power[row.id]["items"]))
+
+    # Umumiy kuch bo'yicha qayta tartiblash
+    house_powers.sort(key=lambda x: x[1], reverse=True)
+
+    for i, (row, total_power, item_atk, item_def, items) in enumerate(house_powers):
+        item_line = ""
+        if items:
+            item_parts = [f"{r.item.emoji}{r.item.name}×{r.quantity}" for r in items]
+            item_line = f"\n   🎯 Itemlar: {', '.join(item_parts)}"
+            if item_atk > 0 or item_def > 0:
+                item_line += f" (+{item_atk}⚔️ +{item_def}🛡)"
         lines.append(
             f"{get_medal(i)} <b>{row.name}</b>\n"
-            f"   ⚡ {power:,} kuch  |  🗡️ {row.total_soldiers:,}  🐉 {row.total_dragons}  🏹 {row.total_scorpions}"
+            f"   ⚡ {total_power:,} kuch  |  🗡️ {row.total_soldiers:,}  🐉 {row.total_dragons}  🏹 {row.total_scorpions}"
+            + item_line
         )
 
     await callback.answer()
