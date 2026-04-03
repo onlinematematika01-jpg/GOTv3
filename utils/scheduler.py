@@ -73,9 +73,7 @@ async def daily_farm_job(bot: Bot, scheduled_amount: int = 0):
                     try:
                         await bot.send_message(
                             h.lord_id,
-                            f"💸 <b>O'lpon to'landi!</b>
-"
-                            f"Xazinangizning 10% i ({actual_tribute:,} tanga) hukmdor xonadoniga o'tkazildi.",
+                            f"💸 <b>O'lpon to'landi!</b>\nXazinangizning 10% i ({actual_tribute:,} tanga) hukmdor xonadoniga o'tkazildi.",
                             parse_mode="HTML"
                         )
                     except Exception:
