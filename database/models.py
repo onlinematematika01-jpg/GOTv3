@@ -252,7 +252,7 @@ class CustomItem(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(64), nullable=False, unique=True)       # Nomi (masalan: "Ballista")
     emoji = Column(String(8), nullable=False, default="⚔️")      # Emoji belgisi
-    item_type = Column(Enum(ItemTypeEnum), nullable=False)       # Turi
+    item_type = Column(Enum(ItemTypeEnum, values_callable=lambda x: [e.value for e in x]), nullable=False)  # Turi
     # Kuch ko'rsatkichlari
     attack_power = Column(Integer, default=0)   # 1 ta bu item nechta askarga teng (hujum)
     defense_power = Column(Integer, default=0)  # 1 ta bu item nechta chayonga qarshi tura oladi
