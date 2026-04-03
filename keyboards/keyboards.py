@@ -45,12 +45,31 @@ def war_menu_keyboard(is_lord: bool, has_active_war: bool) -> InlineKeyboardMark
     return builder.as_markup()
 
 
-def market_keyboard() -> InlineKeyboardMarkup:
+def market_keyboard(custom_items=None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🗡️ Askar Sotib Olish", callback_data="market:buy:soldier")
     builder.button(text="🐉 Ajdar Sotib Olish", callback_data="market:buy:dragon")
     builder.button(text="🏹 Skorpion Sotib Olish", callback_data="market:buy:scorpion")
+    if custom_items:
+        for item in custom_items:
+            builder.button(
+                text=f"{item.emoji} {item.name} Sotib Olish",
+                callback_data=f"market:custom:{item.id}"
+            )
     builder.button(text="📊 Narxlar", callback_data="market:prices")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def custom_item_market_keyboard(items) -> InlineKeyboardMarkup:
+    """Faqat maxsus itemlar uchun keyboard"""
+    builder = InlineKeyboardBuilder()
+    for item in items:
+        builder.button(
+            text=f"{item.emoji} {item.name} — {item.price:,} tanga",
+            callback_data=f"market:custom:{item.id}"
+        )
+    builder.button(text="🔙 Orqaga", callback_data="market:back")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -104,6 +123,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="⚔️ Urush Seanslar", callback_data="admin:war_sessions")
     builder.button(text="🔀 A'zo Ko'chirish", callback_data="admin:transfer_member")
     builder.button(text="🗑 Bazani Tozalash", callback_data="admin:reset_db")
+    builder.button(text="🧪 Maxsus Itemlar", callback_data="admin:custom_items")
     builder.adjust(2)
     return builder.as_markup()
 
@@ -184,4 +204,33 @@ def subscription_keyboard(channel_link: str) -> InlineKeyboardMarkup:
                 callback_data="check_subscription",
             )
         ],
+    ])
+
+
+def custom_items_menu_keyboard() -> InlineKeyboardMarkup:
+    """Maxsus itemlar boshqaruv menyusi"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Yangi Item Qo'shish", callback_data="admin:item:add")],
+        [InlineKeyboardButton(text="📋 Barcha Itemlar", callback_data="admin:item:list")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:back")],
+    ])
+
+
+def item_type_keyboard() -> InlineKeyboardMarkup:
+    """Item turi tanlash"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🐉 Hujum (ajdar kabi)", callback_data="itype:attack")],
+        [InlineKeyboardButton(text="🏹 Mudofaa (chayon kabi)", callback_data="itype:defense")],
+        [InlineKeyboardButton(text="🗡️ Askar (qo'shma)", callback_data="itype:soldier")],
+        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="admin:custom_items")],
+    ])
+
+
+def item_manage_keyboard(item_id: int, is_active: bool) -> InlineKeyboardMarkup:
+    """Item boshqarish tugmalari"""
+    toggle_text = "🔴 O'chirish" if is_active else "🟢 Yoqish"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=toggle_text, callback_data=f"admin:item:toggle:{item_id}")],
+        [InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"admin:item:delete:{item_id}")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:item:list")],
     ])
