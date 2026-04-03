@@ -105,6 +105,31 @@ async def daily_farm_job(bot: Bot, scheduled_amount: int = 0):
                 pass
 
 
+
+async def _transfer_custom_item_loot(session, loser_id: int, winner_id: int):
+    """
+    Yutqazgan xonadon custom itemlarining WAR_LOOT_PERCENT (51%) ini
+    g'olib xonadonga o'tkazadi.
+    """
+    import math
+    from database.repositories import CustomItemRepo
+    from config.settings import settings
+
+    repo = CustomItemRepo(session)
+    loser_items = await repo.get_house_items_with_info(loser_id)
+
+    for row in loser_items:
+        loot_qty = math.ceil(row.quantity * settings.WAR_LOOT_PERCENT)
+        if loot_qty <= 0:
+            continue
+        # Yutqazgandan ayirish
+        row.quantity = max(0, row.quantity - loot_qty)
+        # G'olibga qo'shish
+        await repo.add_house_item(winner_id, row.item_id, loot_qty)
+
+    await session.commit()
+
+
 async def _run_war(war, bot, session):
     """
     Urushni hisoblash va natijalarni yuborish.
@@ -153,6 +178,15 @@ async def _run_war(war, bot, session):
         )
         for s in ally_supports if s.side == "defender"
     ]
+
+    # ── Custom itemlarni xonadonlarga bog'lash (battle uchun) ──────────
+    from database.repositories import CustomItemRepo
+    custom_repo = CustomItemRepo(session)
+    for house in [attacker, defender]:
+        house_ci = await custom_repo.get_house_items_with_info(house.id)
+        house._custom_items = [
+            {"item": row.item, "qty": row.quantity} for row in house_ci
+        ]
 
     # Hisob-kitob
     result = calculate_battle(
@@ -207,6 +241,10 @@ async def _run_war(war, bot, session):
             soldiers=-result.defender_soldiers_lost,
             dragons=-result.defender_dragons_lost,
         )
+        # Custom itemlar o'ljasi — g'olib (attacker) yutilgan (defender) itemlarining 51% ini oladi
+        await _transfer_custom_item_loot(
+            session, loser_id=defender.id, winner_id=attacker.id
+        )
         # Defender vassal bo'ladi — o'lpon tizimi uchun
         await house_repo.set_occupation(defender.id, attacker.id, tax_rate=0.10)
         await _handle_lord_succession(session, war, bot)
@@ -220,6 +258,10 @@ async def _run_war(war, bot, session):
         await house_repo.update_military(defender.id,
             soldiers=-result.defender_soldiers_lost,
             dragons=-result.defender_dragons_lost,
+        )
+        # Custom itemlar o'ljasi — g'olib (defender) yutilgan (attacker) itemlarining 51% ini oladi
+        await _transfer_custom_item_loot(
+            session, loser_id=attacker.id, winner_id=defender.id
         )
 
     # Ittifoqchi yo'qotmalari
