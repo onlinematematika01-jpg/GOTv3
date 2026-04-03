@@ -1626,6 +1626,7 @@ async def item_list(callback: CallbackQuery):
         )
         return
 
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     lines = ["📋 <b>Barcha Maxsus Itemlar:</b>\n"]
     buttons = []
     for item in items:
@@ -1639,7 +1640,6 @@ async def item_list(callback: CallbackQuery):
             callback_data=f"admin:item:info:{item.id}"
         )])
 
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:custom_items")])
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
