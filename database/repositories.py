@@ -853,6 +853,18 @@ class CustomItemRepo:
         )
         return result.scalar_one_or_none()
 
+    async def update_item(self, item_id: int, **kwargs):
+        """Item maydonlarini yangilash (attack_power, defense_power, price)"""
+        from database.models import CustomItem
+        allowed = {"attack_power", "defense_power", "price"}
+        values = {k: v for k, v in kwargs.items() if k in allowed}
+        if not values:
+            return
+        await self.session.execute(
+            update(CustomItem).where(CustomItem.id == item_id).values(**values)
+        )
+        await self.session.commit()
+
     async def toggle_active(self, item_id: int):
         from database.models import CustomItem
         result = await self.session.execute(
