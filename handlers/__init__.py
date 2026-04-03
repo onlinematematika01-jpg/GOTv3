@@ -11,9 +11,12 @@ from handlers.chronicle import router as chronicle_router
 from handlers.claim import router as claim_router
 from handlers.rating import router as rating_router
 from handlers.war_ally import router as war_ally_router
+from handlers.subscription import router as subscription_router
 
 
 def register_all_handlers(dp: Dispatcher):
+    # Majburiy obuna handler'i — birinchi ro'yxatdan o'tkaziladi
+    dp.include_router(subscription_router)
     dp.include_router(start_router)
     dp.include_router(profile_router)
     dp.include_router(market_router)
