@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     BOT_TOKEN: str = "YOUR_BOT_TOKEN"
     DATABASE_URL: str = "postgresql+asyncpg://user:password@localhost:5432/got_bot"
     CHRONICLE_CHANNEL_ID: Optional[int] = None
+    REQUIRED_CHANNEL_ID: Optional[int] = None   # Majburiy obuna kanali (masalan: -1001234567890)
+    REQUIRED_CHANNEL_LINK: Optional[str] = None  # Kanal havolasi (masalan: https://t.me/kanalim)
     ADMIN_IDS: List[int] = []
 
     # O'yin sozlamalari
