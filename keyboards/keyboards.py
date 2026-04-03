@@ -228,9 +228,19 @@ def item_type_keyboard() -> InlineKeyboardMarkup:
 
 def item_manage_keyboard(item_id: int, is_active: bool) -> InlineKeyboardMarkup:
     """Item boshqarish tugmalari"""
-    toggle_text = "🔴 O'chirish" if is_active else "🟢 Yoqish"
+    toggle_text = "🔴 Deaktiv" if is_active else "🟢 Aktiv"
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Tahrirlash", callback_data=f"admin:item:edit:{item_id}")],
         [InlineKeyboardButton(text=toggle_text, callback_data=f"admin:item:toggle:{item_id}")],
         [InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"admin:item:delete:{item_id}")],
         [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:item:list")],
+    ])
+
+def item_edit_keyboard(item_id: int) -> InlineKeyboardMarkup:
+    """Item tahrirlash maydonlari"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚔️ Hujum kuchini o'zgartir", callback_data=f"admin:item:edit:attack:{item_id}")],
+        [InlineKeyboardButton(text="🛡 Mudofaa kuchini o'zgartir", callback_data=f"admin:item:edit:defense:{item_id}")],
+        [InlineKeyboardButton(text="💰 Narxini o'zgartir", callback_data=f"admin:item:edit:price:{item_id}")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data=f"admin:item:info:{item_id}")],
     ])
