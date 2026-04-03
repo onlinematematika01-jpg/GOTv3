@@ -43,6 +43,15 @@ class AdminState(StatesGroup):
     # Urush seanslar
     waiting_war_session_start = State()
     waiting_war_session_end = State()
+    # Custom item qo'shish
+    item_name = State()
+    item_emoji = State()
+    item_type = State()
+    item_attack_power = State()
+    item_defense_power = State()
+    item_price = State()
+    # Item boshqaruvi
+    item_manage = State()
 
 
 # ─── BANK LIMIT — runtime o'zgaruvchilar ───
@@ -1386,4 +1395,332 @@ async def admin_war_session_del_confirm(callback: CallbackQuery):
     await callback.message.answer(
         f"✅ Seans o'chirildi: <b>{removed['start']:02d}:00 – {removed['end']:02d}:00</b>",
         parse_mode="HTML"
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MAXSUS ITEMLAR (Custom Items)
+# ═══════════════════════════════════════════════════════════════════════════
+
+from database.repositories import CustomItemRepo
+from database.models import ItemTypeEnum
+from keyboards.keyboards import custom_items_menu_keyboard, item_type_keyboard, item_manage_keyboard
+
+ITEM_TYPE_LABELS = {
+    ItemTypeEnum.ATTACK:  "🐉 Hujum",
+    ItemTypeEnum.DEFENSE: "🏹 Mudofaa",
+    ItemTypeEnum.SOLDIER: "🗡️ Askar (qo'shma)",
+}
+
+
+@router.callback_query(F.data == "admin:custom_items")
+async def admin_custom_items_menu(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    await state.clear()
+    await callback.answer()
+    await callback.message.edit_text(
+        "🧪 <b>Maxsus Itemlar Boshqaruvi</b>\n\n"
+        "Bu yerdan yangi qurol/birlik turlarini qo'shishingiz,\n"
+        "mavjudlarini boshqarishingiz mumkin.",
+        reply_markup=custom_items_menu_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+# ── YANGI ITEM QO'SHISH ────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "admin:item:add")
+async def item_add_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    await state.set_state(AdminState.item_name)
+    await callback.answer()
+    await callback.message.edit_text(
+        "➕ <b>Yangi Item Qo'shish</b>\n\n"
+        "1️⃣ Item nomini yozing:\n"
+        "<i>(masalan: Ballista, Troll, Qasrchi)</i>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(AdminState.item_name)
+async def item_add_name(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    name = message.text.strip()
+    if len(name) < 2 or len(name) > 50:
+        await message.answer("❌ Nom 2–50 ta belgidan iborat bo'lishi kerak.")
+        return
+    await state.update_data(item_name=name)
+    await state.set_state(AdminState.item_emoji)
+    await message.answer(
+        f"✅ Nom: <b>{name}</b>\n\n"
+        "2️⃣ Item emoji belgisini yuboring:\n"
+        "<i>(masalan: 🏹 🐗 🧨 🪃 — bitta emoji)</i>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(AdminState.item_emoji)
+async def item_add_emoji(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    emoji = message.text.strip()
+    await state.update_data(item_emoji=emoji)
+    await state.set_state(AdminState.item_type)
+    await message.answer(
+        f"✅ Emoji: <b>{emoji}</b>\n\n"
+        "3️⃣ Item turini tanlang:",
+        reply_markup=item_type_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("itype:"))
+async def item_add_type(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    itype_str = callback.data.split(":")[1]
+    itype_map = {
+        "attack":  ItemTypeEnum.ATTACK,
+        "defense": ItemTypeEnum.DEFENSE,
+        "soldier": ItemTypeEnum.SOLDIER,
+    }
+    itype = itype_map.get(itype_str)
+    if not itype:
+        await callback.answer("❌ Noto'g'ri tur.", show_alert=True)
+        return
+
+    await state.update_data(item_type=itype_str)
+    await state.set_state(AdminState.item_attack_power)
+    await callback.answer()
+
+    type_label = ITEM_TYPE_LABELS[itype]
+    await callback.message.edit_text(
+        f"✅ Tur: <b>{type_label}</b>\n\n"
+        "4️⃣ <b>Hujum kuchini</b> kiriting:\n"
+        "<i>1 ta bu item nechta askarga teng? (hujumda)</i>\n"
+        "<i>Hujum qilmasa — 0 kiriting</i>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(AdminState.item_attack_power)
+async def item_add_attack(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        val = int(message.text.strip())
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Musbat son yoki 0 kiriting.")
+        return
+    await state.update_data(item_attack_power=val)
+    await state.set_state(AdminState.item_defense_power)
+    await message.answer(
+        f"✅ Hujum kuchi: <b>{val}</b> askar ekvivalenti\n\n"
+        "5️⃣ <b>Mudofaa kuchini</b> kiriting:\n"
+        "<i>1 ta bu item nechta chayonga qarshi tura oladi?</i>\n"
+        "<i>Mudofaa qilmasa — 0 kiriting</i>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(AdminState.item_defense_power)
+async def item_add_defense(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        val = int(message.text.strip())
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Musbat son yoki 0 kiriting.")
+        return
+    await state.update_data(item_defense_power=val)
+    await state.set_state(AdminState.item_price)
+    await message.answer(
+        f"✅ Mudofaa kuchi: <b>{val}</b> chayon ekvivalenti\n\n"
+        "6️⃣ <b>Narxini</b> kiriting (tanga):",
+        parse_mode="HTML",
+    )
+
+
+@router.message(AdminState.item_price)
+async def item_add_price(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        price = int(message.text.strip())
+        if price <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Musbat narx kiriting.")
+        return
+
+    data = await state.get_data()
+    name         = data["item_name"]
+    emoji        = data["item_emoji"]
+    itype_str    = data["item_type"]
+    attack_power = data["item_attack_power"]
+    defense_power = data["item_defense_power"]
+
+    itype_map = {
+        "attack":  ItemTypeEnum.ATTACK,
+        "defense": ItemTypeEnum.DEFENSE,
+        "soldier": ItemTypeEnum.SOLDIER,
+    }
+    itype = itype_map[itype_str]
+
+    async with AsyncSessionFactory() as session:
+        repo = CustomItemRepo(session)
+        try:
+            item = await repo.create_item(
+                name=name, emoji=emoji, item_type=itype,
+                attack_power=attack_power, defense_power=defense_power,
+                price=price,
+            )
+        except Exception as e:
+            await message.answer(f"❌ Xatolik: {e}")
+            await state.clear()
+            return
+
+    await state.clear()
+    type_label = ITEM_TYPE_LABELS[itype]
+    await message.answer(
+        f"✅ <b>Yangi item yaratildi!</b>\n\n"
+        f"{emoji} <b>{name}</b>\n"
+        f"📌 Turi: {type_label}\n"
+        f"⚔️ Hujum kuchi: {attack_power} askar ekvivalenti\n"
+        f"🛡 Mudofaa kuchi: {defense_power} chayon ekvivalenti\n"
+        f"💰 Narxi: {price:,} tanga\n\n"
+        f"Item bozorda aktiv holatda qo'shildi.",
+        reply_markup=custom_items_menu_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+# ── ITEMLAR RO'YXATI ───────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "admin:item:list")
+async def item_list(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        repo = CustomItemRepo(session)
+        items = await repo.get_all()
+
+    if not items:
+        await callback.answer()
+        await callback.message.edit_text(
+            "📋 Hozircha maxsus itemlar yo'q.",
+            reply_markup=custom_items_menu_keyboard(),
+        )
+        return
+
+    lines = ["📋 <b>Barcha Maxsus Itemlar:</b>\n"]
+    buttons = []
+    for item in items:
+        status = "🟢" if item.is_active else "🔴"
+        lines.append(
+            f"{status} {item.emoji} <b>{item.name}</b> — {item.price:,} tanga\n"
+            f"   ⚔️ Hujum: {item.attack_power} | 🛡 Mudofaa: {item.defense_power}"
+        )
+        buttons.append([InlineKeyboardButton(
+            text=f"{item.emoji} {item.name}",
+            callback_data=f"admin:item:info:{item.id}"
+        )])
+
+    from aiogram.types import InlineKeyboardMarkup
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:custom_items")])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await callback.answer()
+    await callback.message.edit_text(
+        "\n".join(lines),
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("admin:item:info:"))
+async def item_info(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    item_id = int(callback.data.split(":")[-1])
+    async with AsyncSessionFactory() as session:
+        repo = CustomItemRepo(session)
+        item = await repo.get_by_id(item_id)
+
+    if not item:
+        await callback.answer("❌ Item topilmadi.", show_alert=True)
+        return
+
+    type_label = ITEM_TYPE_LABELS.get(item.item_type, str(item.item_type))
+    status = "🟢 Aktiv" if item.is_active else "🔴 O'chirilgan"
+
+    await callback.answer()
+    await callback.message.edit_text(
+        f"{item.emoji} <b>{item.name}</b>\n\n"
+        f"📌 Turi: {type_label}\n"
+        f"⚔️ Hujum kuchi: {item.attack_power} askar ekvivalenti\n"
+        f"🛡 Mudofaa kuchi: {item.defense_power} chayon ekvivalenti\n"
+        f"💰 Narxi: {item.price:,} tanga\n"
+        f"📊 Holati: {status}",
+        reply_markup=item_manage_keyboard(item.id, item.is_active),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("admin:item:toggle:"))
+async def item_toggle(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    item_id = int(callback.data.split(":")[-1])
+    async with AsyncSessionFactory() as session:
+        repo = CustomItemRepo(session)
+        item = await repo.toggle_active(item_id)
+
+    if not item:
+        await callback.answer("❌ Item topilmadi.", show_alert=True)
+        return
+
+    status = "🟢 Aktiv" if item.is_active else "🔴 O'chirilgan"
+    await callback.answer(f"✅ Holat o'zgartirildi: {status}", show_alert=True)
+    await item_info(callback)
+
+
+@router.callback_query(F.data.startswith("admin:item:delete:"))
+async def item_delete(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    item_id = int(callback.data.split(":")[-1])
+    async with AsyncSessionFactory() as session:
+        repo = CustomItemRepo(session)
+        item = await repo.get_by_id(item_id)
+        if not item:
+            await callback.answer("❌ Item topilmadi.", show_alert=True)
+            return
+        name = item.name
+        await repo.delete_item(item_id)
+
+    await callback.answer(f"🗑 '{name}' o'chirildi.", show_alert=True)
+    await callback.message.edit_text(
+        f"✅ <b>{name}</b> o'chirildi.",
+        reply_markup=custom_items_menu_keyboard(),
+        parse_mode="HTML",
     )
