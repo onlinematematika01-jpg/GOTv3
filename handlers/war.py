@@ -366,6 +366,21 @@ async def do_surrender(callback: CallbackQuery):
             )
         )
 
+        # Custom itemlar o'ljasi — taslim bo'lishda ham 51% o'tkaziladi
+        from database.repositories import CustomItemRepo
+        import math
+        from config.settings import settings as _settings
+        custom_repo = CustomItemRepo(session)
+        defender_items = await custom_repo.get_house_items_with_info(defender.id)
+        item_loot_parts = []
+        for row in defender_items:
+            loot_qty = math.ceil(row.quantity * _settings.WAR_LOOT_PERCENT)
+            if loot_qty > 0:
+                row.quantity = max(0, row.quantity - loot_qty)
+                await custom_repo.add_house_item(attacker.id, row.item_id, loot_qty)
+                item_loot_parts.append(f"{row.item.emoji}{row.item.name}×{loot_qty}")
+        await session.commit()
+
         await house_repo.set_occupation(defender.id, attacker.id, tax_rate=0.10)
         await war_repo.end_war(war_id, attacker.id, loot["gold"], surrendered=True)
 
@@ -385,7 +400,8 @@ async def do_surrender(callback: CallbackQuery):
                     f"🏳️ <b>{defender.name} taslim bo'ldi!</b>\n"
                     f"💰 O'lja: {loot['gold']} oltin\n"
                     f"🗡️ +{loot['soldiers']} askar\n"
-                    f"🐉 +{loot['dragons']} ajdar",
+                    f"🐉 +{loot['dragons']} ajdar"
+                    + (f"\n🎁 Itemlar: {', '.join(item_loot_parts)}" if item_loot_parts else ""),
                     parse_mode="HTML"
                 )
             except Exception:
