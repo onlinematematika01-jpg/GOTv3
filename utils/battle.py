@@ -18,6 +18,7 @@ class AllyContribution:
     soldiers: int = 0
     dragons: int = 0
     scorpions: int = 0
+    custom_items: list = None  # [{"item": CustomItem, "qty": int}]
 
 
 @dataclass
@@ -38,6 +39,47 @@ class BattleResult:
     loot_dragons: int
     round_results: list
     battle_log: list
+
+
+
+def _apply_custom_items(house, allies: list, soldiers: int, dragons: int, scorpions: int):
+    """
+    Xonadon va ittifoqchilarning custom itemlari kuchini
+    askar/ajdar/chayon ekvivalentiga o'giradi va qo'shadi.
+
+    Item turlari:
+      ATTACK  → attack_power * qty  → dragons ekvivalenti (ajdar kabi ishlaydi)
+      DEFENSE → defense_power * qty → scorpions ekvivalenti (chayon kabi ishlaydi)
+      SOLDIER → attack_power * qty  → soldiers ekvivalenti
+    """
+    from database.models import ItemTypeEnum
+
+    # Xonadon custom itemlari
+    house_items = getattr(house, '_custom_items', []) or []
+    for entry in house_items:
+        item = entry["item"]
+        qty  = entry["qty"]
+        if item.item_type == ItemTypeEnum.ATTACK:
+            dragons   += item.attack_power * qty
+        elif item.item_type == ItemTypeEnum.DEFENSE:
+            scorpions += item.defense_power * qty
+        elif item.item_type == ItemTypeEnum.SOLDIER:
+            soldiers  += item.attack_power * qty
+
+    # Ittifoqchi custom itemlari
+    for ally in allies:
+        ally_items = getattr(ally, 'custom_items', None) or []
+        for entry in ally_items:
+            item = entry["item"]
+            qty  = entry["qty"]
+            if item.item_type == ItemTypeEnum.ATTACK:
+                dragons   += item.attack_power * qty
+            elif item.item_type == ItemTypeEnum.DEFENSE:
+                scorpions += item.defense_power * qty
+            elif item.item_type == ItemTypeEnum.SOLDIER:
+                soldiers  += item.attack_power * qty
+
+    return soldiers, dragons, scorpions
 
 
 def calculate_battle(
@@ -70,10 +112,28 @@ def calculate_battle(
     def_dragons   = defender_house.total_dragons   + sum(a.dragons   for a in defender_allies)
     def_scorpions = defender_house.total_scorpions + sum(a.scorpions for a in defender_allies)
 
+    # ── Custom itemlar kuchini hisoblash ──────────────────────────────────
+    att_soldiers, att_dragons, att_scorpions = _apply_custom_items(
+        attacker_house, attacker_allies, att_soldiers, att_dragons, att_scorpions
+    )
+    def_soldiers, def_dragons, def_scorpions = _apply_custom_items(
+        defender_house, defender_allies, def_soldiers, def_dragons, def_scorpions
+    )
+
+    # Custom itemlar haqida qisqacha ma'lumot
+    def _custom_items_summary(house) -> str:
+        items = getattr(house, '_custom_items', []) or []
+        if not items:
+            return ""
+        parts = [f"{e['item'].emoji}{e['item'].name}×{e['qty']}" for e in items]
+        return " | " + " ".join(parts)
+
     log.append(
         f"⚔️ <b>JANG BOSHLANMOQDA!</b>\n"
-        f"🔴 {attacker_house.name}: {att_soldiers} askar | {att_dragons} ajdar | {att_scorpions} skorpion\n"
+        f"🔴 {attacker_house.name}: {att_soldiers} askar | {att_dragons} ajdar | {att_scorpions} skorpion"
+        f"{_custom_items_summary(attacker_house)}\n"
         f"🔵 {defender_house.name}: {def_soldiers} askar | {def_dragons} ajdar | {def_scorpions} skorpion"
+        f"{_custom_items_summary(defender_house)}"
     )
     if attacker_allies:
         log.append("🤝 Hujumchi ittifoqchilari: " + ", ".join(a.house_name for a in attacker_allies))
