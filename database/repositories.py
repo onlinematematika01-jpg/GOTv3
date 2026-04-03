@@ -458,7 +458,7 @@ class IronBankRepo:
         return value
 
     async def confiscate_for_debt(self, user: User):
-        """Qarz to'lanmasa — xonadon qo'shin va ajdarlari musodara"""
+        """Qarz to'lanmasa — xonadon qo'shin, ajdar va custom itemlari musodara"""
         if not user.house_id:
             return
         await self.session.execute(
@@ -475,6 +475,25 @@ class IronBankRepo:
                 debt=0,
             )
         )
+        # Custom itemlarni ham musodara qilish (xonadon va a'zolar)
+        from database.models import HouseCustomItem, UserCustomItem
+        from sqlalchemy import delete
+        await self.session.execute(
+            update(HouseCustomItem)
+            .where(HouseCustomItem.house_id == user.house_id)
+            .values(quantity=0)
+        )
+        # A'zolarning shaxsiy custom itemlarini ham nollaymiz
+        user_ids_result = await self.session.execute(
+            select(User.id).where(User.house_id == user.house_id)
+        )
+        uid_list = [r[0] for r in user_ids_result.all()]
+        if uid_list:
+            await self.session.execute(
+                update(UserCustomItem)
+                .where(UserCustomItem.user_id.in_(uid_list))
+                .values(quantity=0)
+            )
         # Qarzlarni yopish
         await self.session.execute(
             update(IronBankLoan).where(
@@ -790,3 +809,145 @@ class RatingRepo:
             .limit(limit)
         )
         return result.all()
+
+
+class CustomItemRepo:
+    """Maxsus itemlar bilan ishlash"""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    # ── Admin: item boshqaruvi ─────────────────────────────────────────────
+
+    async def create_item(
+        self, name: str, emoji: str, item_type, attack_power: int,
+        defense_power: int, price: int
+    ):
+        from database.models import CustomItem
+        item = CustomItem(
+            name=name, emoji=emoji, item_type=item_type,
+            attack_power=attack_power, defense_power=defense_power,
+            price=price, is_active=True,
+        )
+        self.session.add(item)
+        await self.session.commit()
+        await self.session.refresh(item)
+        return item
+
+    async def get_all_active(self):
+        from database.models import CustomItem
+        result = await self.session.execute(
+            select(CustomItem).where(CustomItem.is_active == True)
+        )
+        return result.scalars().all()
+
+    async def get_all(self):
+        from database.models import CustomItem
+        result = await self.session.execute(select(CustomItem))
+        return result.scalars().all()
+
+    async def get_by_id(self, item_id: int):
+        from database.models import CustomItem
+        result = await self.session.execute(
+            select(CustomItem).where(CustomItem.id == item_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def toggle_active(self, item_id: int):
+        from database.models import CustomItem
+        result = await self.session.execute(
+            select(CustomItem).where(CustomItem.id == item_id)
+        )
+        item = result.scalar_one_or_none()
+        if item:
+            item.is_active = not item.is_active
+            await self.session.commit()
+        return item
+
+    async def delete_item(self, item_id: int):
+        from database.models import CustomItem, UserCustomItem, HouseCustomItem
+        await self.session.execute(
+            select(UserCustomItem).where(UserCustomItem.item_id == item_id)
+        )
+        # Cascade o'chirish
+        from sqlalchemy import delete
+        await self.session.execute(
+            delete(UserCustomItem).where(UserCustomItem.item_id == item_id)
+        )
+        await self.session.execute(
+            delete(HouseCustomItem).where(HouseCustomItem.item_id == item_id)
+        )
+        await self.session.execute(
+            delete(CustomItem).where(CustomItem.id == item_id)
+        )
+        await self.session.commit()
+
+    # ── Foydalanuvchi: sotib olish ─────────────────────────────────────────
+
+    async def get_user_items(self, user_id: int):
+        from database.models import UserCustomItem
+        result = await self.session.execute(
+            select(UserCustomItem).where(
+                UserCustomItem.user_id == user_id,
+                UserCustomItem.quantity > 0,
+            )
+        )
+        return result.scalars().all()
+
+    async def add_user_item(self, user_id: int, item_id: int, qty: int):
+        from database.models import UserCustomItem
+        result = await self.session.execute(
+            select(UserCustomItem).where(
+                UserCustomItem.user_id == user_id,
+                UserCustomItem.item_id == item_id,
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row:
+            row.quantity += qty
+        else:
+            row = UserCustomItem(user_id=user_id, item_id=item_id, quantity=qty)
+            self.session.add(row)
+        await self.session.commit()
+
+    # ── Xonadon: umumiy hisob ─────────────────────────────────────────────
+
+    async def get_house_items(self, house_id: int):
+        from database.models import HouseCustomItem
+        result = await self.session.execute(
+            select(HouseCustomItem).where(
+                HouseCustomItem.house_id == house_id,
+                HouseCustomItem.quantity > 0,
+            )
+        )
+        return result.scalars().all()
+
+    async def add_house_item(self, house_id: int, item_id: int, qty: int):
+        from database.models import HouseCustomItem
+        result = await self.session.execute(
+            select(HouseCustomItem).where(
+                HouseCustomItem.house_id == house_id,
+                HouseCustomItem.item_id == item_id,
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row:
+            row.quantity += qty
+        else:
+            row = HouseCustomItem(house_id=house_id, item_id=item_id, quantity=qty)
+            self.session.add(row)
+        await self.session.commit()
+
+    async def get_house_items_with_info(self, house_id: int):
+        """House itemlarini CustomItem ma'lumotlari bilan birga qaytaradi"""
+        from database.models import HouseCustomItem, CustomItem
+        from sqlalchemy.orm import selectinload
+        result = await self.session.execute(
+            select(HouseCustomItem)
+            .options(selectinload(HouseCustomItem.item))
+            .where(
+                HouseCustomItem.house_id == house_id,
+                HouseCustomItem.quantity > 0,
+            )
+        )
+        return result.scalars().all()
