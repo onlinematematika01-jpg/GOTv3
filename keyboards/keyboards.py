@@ -167,3 +167,21 @@ def alliance_request_keyboard(from_house_id: int, to_house_id: int) -> InlineKey
             ),
         ]
     ])
+
+
+def subscription_keyboard(channel_link: str) -> InlineKeyboardMarkup:
+    """Majburiy obuna uchun kanal havolasi va tekshirish tugmasi"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="📢 Kanalga o'tish",
+                url=channel_link,
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="✅ A'zo bo'ldim, tekshirish",
+                callback_data="check_subscription",
+            )
+        ],
+    ])
