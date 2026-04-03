@@ -225,32 +225,17 @@ async def claim_reject(callback: CallbackQuery):
         # Status -> IN_PROGRESS
         await claim_repo.set_status(claim_id, ClaimStatusEnum.IN_PROGRESS)
 
-        # Urush vaqtini tekshirish
-        now = datetime.utcnow()
-        local_hour = (now.hour + 5) % 24
-        if not (settings.WAR_START_HOUR <= local_hour < settings.WAR_DECLARE_DEADLINE):
-            await callback.answer(
-                "⚠️ Rad etdingiz! Urush faqat 19:00–22:00 da boshlanadi.",
-                show_alert=True
-            )
-            await callback.message.edit_text(
-                f"⚔️ <b>Rad etdingiz!</b>\n\n"
-                f"Urush vaqti kelganda (19:00–22:00) avtomatik boshlanadi.",
-                parse_mode="HTML"
-            )
-            return
-
         # Mavjud urush bormi?
         active = await war_repo.get_active_war(user.house_id)
         if active:
+            await session.commit()
             await callback.answer("⚠️ Allaqachon faol urushingiz bor!", show_alert=True)
             return
 
+        # Civil urush darhol boshlanadi — vaqtga bog'liq emas
+        now = datetime.utcnow()
         grace_ends = now + timedelta(minutes=settings.GRACE_PERIOD_MINUTES)
-        war = await war_repo.create_war(
-            claimant.id, defender.id, grace_ends
-        )
-        # war_type = civil va claim_id ni to'ldirish
+        war = await war_repo.create_war(claimant.id, defender.id, grace_ends)
         from sqlalchemy import update
         from database.models import War
         await session.execute(
@@ -374,13 +359,12 @@ async def check_claim_wars_ended(bot, session):
         if claimant_won_all:
             winner_id = claim.claimant_house_id
         else:
-            # Da'vogar yutqazgan urushni topamiz
-            # G'olib — da'vogarni mag'lub qilgan xonadon
-            winner_id = None
+            # G'alaba sonini sanash — eng ko'p yutgan xonadon HIGH_LORD
+            wins: dict[int, int] = {}
             for w in ended_wars:
-                if w.winner_house_id != claim.claimant_house_id:
-                    winner_id = w.winner_house_id
-                    break
+                if w.winner_house_id:
+                    wins[w.winner_house_id] = wins.get(w.winner_house_id, 0) + 1
+            winner_id = max(wins, key=lambda k: wins[k]) if wins else None
 
         await claim_repo.set_status(claim.id, ClaimStatusEnum.COMPLETED)
 
