@@ -41,45 +41,56 @@ class BattleResult:
     battle_log: list
 
 
-
-def _apply_custom_items(house, allies: list, soldiers: int, dragons: int, scorpions: int):
+def _collect_custom_items(house, allies: list):
     """
-    Xonadon va ittifoqchilarning custom itemlari kuchini
-    askar/ajdar/chayon ekvivalentiga o'giradi va qo'shadi.
+    Xonadon va ittifoqchilarning custom itemlarini yig'ib,
+    tur bo'yicha ajratib qaytaradi.
 
-    Item turlari:
-      ATTACK  → attack_power * qty  → dragons ekvivalenti (ajdar kabi ishlaydi)
-      DEFENSE → defense_power * qty → scorpions ekvivalenti (chayon kabi ishlaydi)
-      SOLDIER → attack_power * qty  → soldiers ekvivalenti
+    Qaytaradi: {
+        "attack":  [ {"name": ..., "emoji": ..., "attack_power": N,  "qty": Q}, ... ],
+        "defense": [ {"name": ..., "emoji": ..., "defense_power": M, "qty": Q}, ... ],
+        "soldier": [ {"name": ..., "emoji": ..., "attack_power": N,  "qty": Q}, ... ],
+    }
     """
     from database.models import ItemTypeEnum
 
-    # Xonadon custom itemlari
-    house_items = getattr(house, '_custom_items', []) or []
-    for entry in house_items:
-        item = entry["item"]
-        qty  = entry["qty"]
+    result = {"attack": [], "defense": [], "soldier": []}
+
+    def _add(item, qty):
+        if qty <= 0:
+            return
         if item.item_type == ItemTypeEnum.ATTACK:
-            dragons   += item.attack_power * qty
+            result["attack"].append({
+                "name": item.name, "emoji": item.emoji,
+                "attack_power": item.attack_power, "qty": qty,
+            })
         elif item.item_type == ItemTypeEnum.DEFENSE:
-            scorpions += item.defense_power * qty
+            result["defense"].append({
+                "name": item.name, "emoji": item.emoji,
+                "defense_power": item.defense_power, "qty": qty,
+            })
         elif item.item_type == ItemTypeEnum.SOLDIER:
-            soldiers  += item.attack_power * qty
+            result["soldier"].append({
+                "name": item.name, "emoji": item.emoji,
+                "attack_power": item.attack_power, "qty": qty,
+            })
 
-    # Ittifoqchi custom itemlari
+    for entry in (getattr(house, '_custom_items', []) or []):
+        _add(entry["item"], entry["qty"])
+
     for ally in allies:
-        ally_items = getattr(ally, 'custom_items', None) or []
-        for entry in ally_items:
-            item = entry["item"]
-            qty  = entry["qty"]
-            if item.item_type == ItemTypeEnum.ATTACK:
-                dragons   += item.attack_power * qty
-            elif item.item_type == ItemTypeEnum.DEFENSE:
-                scorpions += item.defense_power * qty
-            elif item.item_type == ItemTypeEnum.SOLDIER:
-                soldiers  += item.attack_power * qty
+        for entry in (getattr(ally, 'custom_items', None) or []):
+            _add(entry["item"], entry["qty"])
 
-    return soldiers, dragons, scorpions
+    return result
+
+
+def _items_summary(items_dict: dict) -> str:
+    parts = []
+    for group in items_dict.values():
+        for it in group:
+            parts.append(f"{it['emoji']}{it['name']}×{it['qty']}")
+    return (" | " + " ".join(parts)) if parts else ""
 
 
 def calculate_battle(
@@ -91,10 +102,24 @@ def calculate_battle(
 ) -> BattleResult:
     """
     3 Roundlik urush mexanikasi:
-      Round 1 — Ajdar vs Skorpion
-      Round 2 — Ajdar vs Askar
-      Round 3 — Askar vs Askar
-      G'OLIB: 3-ROUND natijasi hal qiladi
+
+      Round 1 — Ajdar vs Skorpion  (+DEFENSE itemlar skorpion kabi ishlaydi)
+      Round 2 — Ajdar vs Askar     (+ATTACK itemlar ajdar kabi ishlaydi, SOLDIER itemlar askar kabi)
+      Round 3 — Askar vs Askar     (+SOLDIER itemlar askar kabi ishlaydi)
+
+    Custom item mexanikasi:
+      ATTACK  item (attack_power=N): 1 ta item = N askarni yo'q qila oladi (ajdar kabi).
+              Uni o'ldirish uchun N+1 askar kerak. Uni o'ldirish uchun ajdar:
+              1 ajdar = DRAGON_KILLS_SOLDIERS askar ekvivalenti, item = N askar →
+              math.ceil(DRAGON_KILLS_SOLDIERS / N) ta item = 1 ajdar.
+              DEFENSE itemlar bu itemga ta'sir o'tkaza olmaydi (defense_power=0 bo'lsa).
+
+      DEFENSE item (defense_power=M): 1 ta item = M ta skorpion ekvivalenti (Round 1 da).
+              Agar M=0 bo'lsa, skorpionlar bu itemga ta'sir qila olmaydi.
+
+      SOLDIER item (attack_power=N): 1 ta item = N ta qo'shimcha askar (Round 2 va 3 da).
+
+    G'OLIB: 3-ROUND natijasi hal qiladi.
     """
     if attacker_allies is None:
         attacker_allies = []
@@ -112,28 +137,22 @@ def calculate_battle(
     def_dragons   = defender_house.total_dragons   + sum(a.dragons   for a in defender_allies)
     def_scorpions = defender_house.total_scorpions + sum(a.scorpions for a in defender_allies)
 
-    # ── Custom itemlar kuchini hisoblash ──────────────────────────────────
-    att_soldiers, att_dragons, att_scorpions = _apply_custom_items(
-        attacker_house, attacker_allies, att_soldiers, att_dragons, att_scorpions
-    )
-    def_soldiers, def_dragons, def_scorpions = _apply_custom_items(
-        defender_house, defender_allies, def_soldiers, def_dragons, def_scorpions
-    )
+    # Custom itemlarni yig'ish (alohida birlik sifatida)
+    att_items = _collect_custom_items(attacker_house, attacker_allies)
+    def_items = _collect_custom_items(defender_house, defender_allies)
 
-    # Custom itemlar haqida qisqacha ma'lumot
-    def _custom_items_summary(house) -> str:
-        items = getattr(house, '_custom_items', []) or []
-        if not items:
-            return ""
-        parts = [f"{e['item'].emoji}{e['item'].name}×{e['qty']}" for e in items]
-        return " | " + " ".join(parts)
+    # SOLDIER itemlarni darhol askarlarga qo'shish (ular hamma roundda askar kabi ishlaydi)
+    for it in att_items["soldier"]:
+        att_soldiers += it["attack_power"] * it["qty"]
+    for it in def_items["soldier"]:
+        def_soldiers += it["attack_power"] * it["qty"]
 
     log.append(
         f"⚔️ <b>JANG BOSHLANMOQDA!</b>\n"
         f"🔴 {attacker_house.name}: {att_soldiers} askar | {att_dragons} ajdar | {att_scorpions} skorpion"
-        f"{_custom_items_summary(attacker_house)}\n"
+        f"{_items_summary({'a': att_items['attack'], 'd': att_items['defense']})}\n"
         f"🔵 {defender_house.name}: {def_soldiers} askar | {def_dragons} ajdar | {def_scorpions} skorpion"
-        f"{_custom_items_summary(defender_house)}"
+        f"{_items_summary({'a': def_items['attack'], 'd': def_items['defense']})}"
     )
     if attacker_allies:
         log.append("🤝 Hujumchi ittifoqchilari: " + ", ".join(a.house_name for a in attacker_allies))
@@ -144,59 +163,88 @@ def calculate_battle(
     # QAL'A MUDOFAASI — Roundlardan oldin
     # ═══════════════════════════════════════
     castle_defense = getattr(defender_house, 'castle_defense', 0) or 0
-    castle_triggered = False
 
     if castle_defense > 0:
         log.append(f"\n🏰 <b>QAL'A MUDOFAASI FAOLLASHDI!</b>\nMudofaa balli: {castle_defense} | Hujumchi ajdarlari: {att_dragons}")
         if castle_defense > att_dragons:
-            # Qal'a hujumchining barcha resurslarini yarmilashtiradi
             att_soldiers  = math.ceil(att_soldiers  / 2)
             att_dragons   = math.ceil(att_dragons   / 2)
             att_scorpions = math.ceil(att_scorpions / 2)
-            castle_triggered = True
+            # ATTACK itemlar ham yarmilanadi
+            for it in att_items["attack"]:
+                it["qty"] = math.ceil(it["qty"] / 2)
             log.append(
-                f"🏰 Qal'a mudofaa balli ({castle_defense}) hujumchi ajdarlaridan ({att_dragons*2}) ko'p!\n"
+                f"🏰 Qal'a mudofaa balli ({castle_defense}) hujumchi ajdarlaridan ko'p!\n"
                 f"💥 Hujumchining barcha resurslari yarimlandi:\n"
                 f"🔴 {attacker_house.name}: {att_soldiers} askar | {att_dragons} ajdar | {att_scorpions} skorpion"
             )
-            # Qal'a bir marta ishlatiladi — ballni nolga tushirish
             defender_house.castle_defense = 0
         else:
             log.append(f"🏰 Qal'a mudofaasi yetarli emas (mudofaa {castle_defense} ≤ ajdar {att_dragons}) — ta'sir yo'q")
 
     # ═══════════════════════════════════════
     # ROUND 1 — Ajdar vs Skorpion
+    #           + DEFENSE itemlar skorpion kabi ishlaydi
     # ═══════════════════════════════════════
     r1_log = ["", "🔥 <b>1-ROUND: AJDAR vs SKORPION</b>"]
 
-    # Ikkala tomon bir vaqtda o'q uzadi
     def_dragons_killed = 0
     att_dragons_killed = 0
 
+    # --- Mudofaachining skorpionlari hujumchi ajdarlariga qarshi ---
     if def_scorpions > 0 and att_dragons > 0:
-        def_dragons_killed = min(def_scorpions // settings.SCORPIONS_PER_DRAGON, att_dragons)
+        killed = min(def_scorpions // settings.SCORPIONS_PER_DRAGON, att_dragons)
+        def_dragons_killed += killed
+        att_dragons -= killed
         r1_log.append(
             f"🏹 {defender_house.name} skorpionlari ({def_scorpions} ta) → "
-            f"hujumchi {def_dragons_killed} ajdar halok"
+            f"hujumchi {killed} ajdar halok"
         )
 
+    # --- Mudofaachining DEFENSE itemlari hujumchi ajdarlariga qarshi ---
+    for it in def_items["defense"]:
+        if it["defense_power"] <= 0 or att_dragons <= 0:
+            continue
+        total_scorp_equiv = it["defense_power"] * it["qty"]
+        killed = min(total_scorp_equiv // settings.SCORPIONS_PER_DRAGON, att_dragons)
+        if killed > 0:
+            def_dragons_killed += killed
+            att_dragons -= killed
+            r1_log.append(
+                f"🛡 {defender_house.name} {it['emoji']}{it['name']}×{it['qty']} "
+                f"({total_scorp_equiv} skorpion ekvivalenti) → hujumchi {killed} ajdar halok"
+            )
+
+    # --- Hujumchining skorpionlari mudofaachi ajdarlariga qarshi ---
     if att_scorpions > 0 and def_dragons > 0:
-        att_dragons_killed = min(att_scorpions // settings.SCORPIONS_PER_DRAGON, def_dragons)
+        killed = min(att_scorpions // settings.SCORPIONS_PER_DRAGON, def_dragons)
+        att_dragons_killed += killed
+        def_dragons -= killed
         r1_log.append(
             f"🏹 {attacker_house.name} skorpionlari ({att_scorpions} ta) → "
-            f"mudofaachi {att_dragons_killed} ajdar halok"
+            f"mudofaachi {killed} ajdar halok"
         )
 
-    att_dragons   -= def_dragons_killed
-    def_dragons   -= att_dragons_killed
-    att_scorpions  = 0
-    def_scorpions  = 0
+    # --- Hujumchining DEFENSE itemlari mudofaachi ajdarlariga qarshi ---
+    for it in att_items["defense"]:
+        if it["defense_power"] <= 0 or def_dragons <= 0:
+            continue
+        total_scorp_equiv = it["defense_power"] * it["qty"]
+        killed = min(total_scorp_equiv // settings.SCORPIONS_PER_DRAGON, def_dragons)
+        if killed > 0:
+            att_dragons_killed += killed
+            def_dragons -= killed
+            r1_log.append(
+                f"🛡 {attacker_house.name} {it['emoji']}{it['name']}×{it['qty']} "
+                f"({total_scorp_equiv} skorpion ekvivalenti) → mudofaachi {killed} ajdar halok"
+            )
+
+    att_scorpions = 0
+    def_scorpions = 0
 
     r1_log.append(
         f"📊 Natija: Hujumchi {att_dragons} ajdar | Mudofaachi {def_dragons} ajdar qoldi"
     )
-
-    # Ko'proq ajdar yo'q qilgan tomon yutadi
     r1_att_wins = def_dragons_killed >= att_dragons_killed
     r1_log.append(
         f"{'🔴 Hujumchi' if r1_att_wins else '🔵 Mudofaachi'} 1-Roundni yutdi"
@@ -206,14 +254,14 @@ def calculate_battle(
 
     # ═══════════════════════════════════════
     # ROUND 2 — Ajdar vs Askar
+    #           + ATTACK itemlar ajdar kabi ishlaydi
     # ═══════════════════════════════════════
     r2_log = ["", "🐉 <b>2-ROUND: AJDAR vs ASKAR</b>"]
 
-    # Hujumchi ajdarlari mudofaachi askarlariga qarshi
+    # --- Hujumchi ajdarlari mudofaachi askarlariga qarshi ---
     remaining_att_dragons = att_dragons
     while remaining_att_dragons > 0 and def_soldiers > 0:
         if def_soldiers > settings.DRAGON_KILLS_SOLDIERS:
-            # 201+ askar: ajdar o'ladi, 200 askar o'ladi, qolganlar keyingi ajdarga qarshi
             def_soldiers -= settings.DRAGON_KILLS_SOLDIERS
             remaining_att_dragons -= 1
             r2_log.append(
@@ -221,7 +269,6 @@ def calculate_battle(
                 f"({def_soldiers} mudofaachi askari qoldi)"
             )
         else:
-            # <=200 askar: ajdar TIRIK qoladi, askarning yarmi o'ladi, loop to'xtaydi
             half = math.ceil(def_soldiers / 2)
             def_soldiers -= half
             r2_log.append(
@@ -231,11 +278,36 @@ def calculate_battle(
             break
     att_dragons = remaining_att_dragons
 
-    # Mudofaachi ajdarlari hujumchi askarlariga qarshi
+    # --- Hujumchi ATTACK itemlari mudofaachi askarlariga qarshi ---
+    # 1 item = attack_power askar yo'q qiladi, o'lishi uchun attack_power+1 askar kerak
+    for it in att_items["attack"]:
+        if it["attack_power"] <= 0 or def_soldiers <= 0:
+            continue
+        remaining_items = it["qty"]
+        while remaining_items > 0 and def_soldiers > 0:
+            kills = it["attack_power"]
+            if def_soldiers > kills:
+                def_soldiers -= kills
+                remaining_items -= 1
+                r2_log.append(
+                    f"⚔️ Hujumchi {it['emoji']}{it['name']} {kills} askar o'ldirdi, halok bo'ldi "
+                    f"({def_soldiers} mudofaachi askari qoldi)"
+                )
+            else:
+                # Askar soni itemni o'ldirish uchun yetarli emas — item tirik qoladi
+                half = math.ceil(def_soldiers / 2)
+                def_soldiers -= half
+                r2_log.append(
+                    f"⚔️ Hujumchi {it['emoji']}{it['name']} {half} askar o'ldirdi, item TIRIK qoldi "
+                    f"({def_soldiers} mudofaachi askari qoldi)"
+                )
+                break
+        it["qty"] = remaining_items  # Qolgan itemlar soni yangilanadi
+
+    # --- Mudofaachi ajdarlari hujumchi askarlariga qarshi ---
     remaining_def_dragons = def_dragons
     while remaining_def_dragons > 0 and att_soldiers > 0:
         if att_soldiers > settings.DRAGON_KILLS_SOLDIERS:
-            # 201+ askar: ajdar o'ladi, 200 askar o'ladi, qolganlar keyingi ajdarga qarshi
             att_soldiers -= settings.DRAGON_KILLS_SOLDIERS
             remaining_def_dragons -= 1
             r2_log.append(
@@ -243,7 +315,6 @@ def calculate_battle(
                 f"({att_soldiers} hujumchi askari qoldi)"
             )
         else:
-            # <=200 askar: ajdar TIRIK qoladi, askarning yarmi o'ladi, loop to'xtaydi
             half = math.ceil(att_soldiers / 2)
             att_soldiers -= half
             r2_log.append(
@@ -253,12 +324,35 @@ def calculate_battle(
             break
     def_dragons = remaining_def_dragons
 
+    # --- Mudofaachi ATTACK itemlari hujumchi askarlariga qarshi ---
+    for it in def_items["attack"]:
+        if it["attack_power"] <= 0 or att_soldiers <= 0:
+            continue
+        remaining_items = it["qty"]
+        while remaining_items > 0 and att_soldiers > 0:
+            kills = it["attack_power"]
+            if att_soldiers > kills:
+                att_soldiers -= kills
+                remaining_items -= 1
+                r2_log.append(
+                    f"⚔️ Mudofaachi {it['emoji']}{it['name']} {kills} askar o'ldirdi, halok bo'ldi "
+                    f"({att_soldiers} hujumchi askari qoldi)"
+                )
+            else:
+                half = math.ceil(att_soldiers / 2)
+                att_soldiers -= half
+                r2_log.append(
+                    f"⚔️ Mudofaachi {it['emoji']}{it['name']} {half} askar o'ldirdi, item TIRIK qoldi "
+                    f"({att_soldiers} hujumchi askari qoldi)"
+                )
+                break
+        it["qty"] = remaining_items
+
     att_power_r2 = att_soldiers + att_dragons * settings.DRAGON_KILLS_SOLDIERS
     def_power_r2 = def_soldiers + def_dragons * settings.DRAGON_KILLS_SOLDIERS
     r2_log.append(
         f"📊 Natija: Hujumchi kuch {att_power_r2} | Mudofaachi kuch {def_power_r2}"
     )
-
     r2_att_wins = att_power_r2 >= def_power_r2
     r2_log.append(
         f"{'🔴 Hujumchi' if r2_att_wins else '🔵 Mudofaachi'} 2-Roundni yutdi"
@@ -268,6 +362,7 @@ def calculate_battle(
 
     # ═══════════════════════════════════════
     # ROUND 3 — Askar vs Askar
+    # (SOLDIER itemlar allaqachon att_soldiers/def_soldiers ga qo'shilgan)
     # ═══════════════════════════════════════
     r3_log = ["", "⚔️ <b>3-ROUND: ASKAR vs ASKAR</b>"]
 
@@ -285,7 +380,6 @@ def calculate_battle(
         att_ratio = att_soldiers / total
         def_ratio = def_soldiers / total
 
-        # Kuchliroq tomon kamroq yo'qotadi, max 30% cheklov
         att_lost = min(math.ceil(att_soldiers * def_ratio * 0.6), math.ceil(att_soldiers * 0.30))
         def_lost = min(math.ceil(def_soldiers * att_ratio * 0.6), math.ceil(def_soldiers * 0.30))
 
@@ -323,11 +417,10 @@ def calculate_battle(
     # ═══════════════════════════════════════
     # YO'QOTMALAR
     # ═══════════════════════════════════════
-    att_total_start = attacker_house.total_soldiers + sum(a.soldiers for a in attacker_allies)
-    def_total_start = defender_house.total_soldiers + sum(a.soldiers for a in defender_allies)
-
-    att_dragons_start = attacker_house.total_dragons + sum(a.dragons for a in attacker_allies)
-    def_dragons_start = defender_house.total_dragons + sum(a.dragons for a in defender_allies)
+    att_total_start   = attacker_house.total_soldiers + sum(a.soldiers for a in attacker_allies)
+    def_total_start   = defender_house.total_soldiers + sum(a.soldiers for a in defender_allies)
+    att_dragons_start = attacker_house.total_dragons  + sum(a.dragons  for a in attacker_allies)
+    def_dragons_start = defender_house.total_dragons  + sum(a.dragons  for a in defender_allies)
 
     att_soldiers_lost  = max(0, att_total_start - att_soldiers)
     att_dragons_lost   = max(0, att_dragons_start - att_dragons)
@@ -341,10 +434,8 @@ def calculate_battle(
     def _ally_loss(ally, side_wins, side_soldiers_lost, side_total_soldiers):
         if side_wins:
             if ally.join_type == "soldiers":
-                # Askarlar to'liq qaytadi
                 return {"soldiers": 0, "dragons": 0, "scorpions": 0}
             else:
-                # "full" — proportional yo'qotish
                 ratio = (ally.soldiers / side_total_soldiers) if side_total_soldiers > 0 else 0
                 return {
                     "soldiers": math.floor(side_soldiers_lost * ratio),
@@ -352,7 +443,6 @@ def calculate_battle(
                     "scorpions": ally.scorpions,
                 }
         else:
-            # Mag'lubiyat — hammasi yo'qoladi
             return {
                 "soldiers": ally.soldiers,
                 "dragons": ally.dragons if ally.join_type == "full" else 0,
@@ -371,9 +461,9 @@ def calculate_battle(
     # ═══════════════════════════════════════
     # O'LJA
     # ═══════════════════════════════════════
-    loot_gold     = math.ceil(defender_gold                     * settings.WAR_LOOT_PERCENT) if attacker_wins else 0
-    loot_soldiers = math.ceil(defender_house.total_soldiers     * settings.WAR_LOOT_PERCENT) if attacker_wins else 0
-    loot_dragons  = math.ceil(defender_house.total_dragons      * settings.WAR_LOOT_PERCENT) if attacker_wins else 0
+    loot_gold     = math.ceil(defender_gold                 * settings.WAR_LOOT_PERCENT) if attacker_wins else 0
+    loot_soldiers = math.ceil(defender_house.total_soldiers * settings.WAR_LOOT_PERCENT) if attacker_wins else 0
+    loot_dragons  = math.ceil(defender_house.total_dragons  * settings.WAR_LOOT_PERCENT) if attacker_wins else 0
 
     if attacker_wins:
         log.append(f"💰 O'lja: {loot_gold} oltin | 🗡️ {loot_soldiers} askar | 🐉 {loot_dragons} ajdar")
