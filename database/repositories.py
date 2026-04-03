@@ -327,59 +327,62 @@ class IronBankRepo:
         house = result.scalar_one_or_none()
         if not house or house.treasury < amount:
             return {"success": False, "reason": "Xonadon xazinasida yetarli oltin yo'q"}
-        actual = min(amount, user.debt)
+
+        # Xonadonning haqiqiy qarzi — IronBankLoan dan olamiz (lord almashsa ham to'g'ri)
+        loans_result = await self.session.execute(
+            select(IronBankLoan).where(
+                IronBankLoan.house_id == house_id,
+                IronBankLoan.paid == False,
+            )
+        )
+        active_loans = loans_result.scalars().all()
+        house_total_debt = sum(loan.total_due for loan in active_loans)
+
+        if house_total_debt <= 0:
+            return {"success": False, "reason": "Xonadonning faol qarzi yo'q"}
+
+        actual = min(amount, house_total_debt)
+
+        # Xazinadan ayirish
         await self.session.execute(
             update(House).where(House.id == house_id).values(
                 treasury=House.treasury - actual,
             )
         )
-        new_debt = user.debt - actual
+
+        # Qarzlarni kamaytirish — eng eski qarzdan boshlab to'laymiz
+        remaining_payment = actual
+        for loan in sorted(active_loans, key=lambda l: l.id):
+            if remaining_payment <= 0:
+                break
+            if loan.total_due <= remaining_payment:
+                remaining_payment -= loan.total_due
+                loan.total_due = 0
+                loan.paid = True
+            else:
+                loan.total_due -= remaining_payment
+                remaining_payment = 0
+
+        new_debt = house_total_debt - actual
+
+        # user.debt ni ham sinxronlashtirish (joriy lord uchun)
         await self.session.execute(
             update(User).where(User.id == user.id).values(
-                debt=new_debt,
+                debt=max(0, new_debt),
             )
         )
-        # Qarz to'liq to'langan bo'lsa — IronBankLoan ni paid=True qilish
-        if new_debt <= 0:
-            await self.session.execute(
-                update(IronBankLoan).where(
-                    (IronBankLoan.house_id == house_id) | (IronBankLoan.user_id == user.id),
-                    IronBankLoan.paid == False,
-                ).values(paid=True)
-            )
+
         await self.session.commit()
         return {"success": True, "paid": actual, "remaining": new_debt}
 
     async def get_all_active_loans(self) -> list:
-        """Admin uchun — barcha to'lanmagan qarzlar (user.debt > 0 bo'lganlar)"""
+        """Admin uchun — barcha to'lanmagan qarzlar"""
         result = await self.session.execute(
             select(IronBankLoan)
-            .join(User, User.id == IronBankLoan.user_id)
-            .where(
-                IronBankLoan.paid == False,
-                User.debt > 0,
-            )
+            .where(IronBankLoan.paid == False)
             .order_by(IronBankLoan.due_date)
         )
-        loans = result.scalars().all()
-        # Eski to'langan qarzlarni DB da ham yopib qo'yamiz
-        paid_ids = []
-        result2 = await self.session.execute(
-            select(IronBankLoan)
-            .join(User, User.id == IronBankLoan.user_id)
-            .where(
-                IronBankLoan.paid == False,
-                User.debt <= 0,
-            )
-        )
-        stale = result2.scalars().all()
-        if stale:
-            stale_ids = [l.id for l in stale]
-            await self.session.execute(
-                update(IronBankLoan).where(IronBankLoan.id.in_(stale_ids)).values(paid=True)
-            )
-            await self.session.commit()
-        return loans
+        return result.scalars().all()
 
     async def extend_due_date(self, house_id: int, days: int):
         """Qarz muddatini uzaytirish"""
@@ -576,21 +579,6 @@ class BotSettingsRepo:
         """Farm jadvalini saqlash"""
         import json
         await self.set("farm_schedules", json.dumps(schedules))
-
-    async def get_war_sessions(self) -> list[dict]:
-        """Urush seanslarini olish"""
-        import json
-        raw = await self.get("war_sessions")
-        if not raw:
-            return [{"start": 19, "end": 23, "declare_deadline": 22}]
-        try:
-            return json.loads(raw)
-        except Exception:
-            return [{"start": 19, "end": 23, "declare_deadline": 22}]
-
-    async def set_war_sessions(self, sessions: list[dict]):
-        import json
-        await self.set("war_sessions", json.dumps(sessions))
 
 
 class HukmdorClaimRepo:
