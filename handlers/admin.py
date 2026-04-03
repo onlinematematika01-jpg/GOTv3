@@ -52,6 +52,9 @@ class AdminState(StatesGroup):
     item_price = State()
     # Item boshqaruvi
     item_manage = State()
+    item_edit_attack = State()
+    item_edit_defense = State()
+    item_edit_price = State()
 
 
 # ─── BANK LIMIT — runtime o'zgaruvchilar ───
@@ -1404,7 +1407,7 @@ async def admin_war_session_del_confirm(callback: CallbackQuery):
 
 from database.repositories import CustomItemRepo
 from database.models import ItemTypeEnum
-from keyboards.keyboards import custom_items_menu_keyboard, item_type_keyboard, item_manage_keyboard
+from keyboards.keyboards import custom_items_menu_keyboard, item_type_keyboard, item_manage_keyboard, item_edit_keyboard
 
 ITEM_TYPE_LABELS = {
     ItemTypeEnum.ATTACK:  "🐉 Hujum",
@@ -1723,4 +1726,146 @@ async def item_delete(callback: CallbackQuery):
         f"✅ <b>{name}</b> o'chirildi.",
         reply_markup=custom_items_menu_keyboard(),
         parse_mode="HTML",
+    )
+
+
+# ── ITEM TAHRIRLASH ────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("admin:item:edit:") & ~F.data.startswith("admin:item:edit:attack:") & ~F.data.startswith("admin:item:edit:defense:") & ~F.data.startswith("admin:item:edit:price:"))
+async def item_edit_menu(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    item_id = int(callback.data.split(":")[-1])
+    async with AsyncSessionFactory() as session:
+        repo = CustomItemRepo(session)
+        item = await repo.get_by_id(item_id)
+    if not item:
+        await callback.answer("❌ Item topilmadi.", show_alert=True)
+        return
+    await callback.answer()
+    await callback.message.edit_text(
+        f"✏️ <b>{item.emoji} {item.name}</b> — tahrirlash\n\n"
+        f"⚔️ Hujum kuchi: <b>{item.attack_power}</b>\n"
+        f"🛡 Mudofaa kuchi: <b>{item.defense_power}</b>\n"
+        f"💰 Narxi: <b>{item.price:,}</b> tanga\n\n"
+        f"Qaysi maydonni o'zgartirmoqchisiz?",
+        reply_markup=item_edit_keyboard(item_id),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("admin:item:edit:attack:"))
+async def item_edit_attack_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    item_id = int(callback.data.split(":")[-1])
+    await state.set_state(AdminState.item_edit_attack)
+    await state.update_data(edit_item_id=item_id)
+    await callback.answer()
+    await callback.message.edit_text(
+        "⚔️ <b>Yangi hujum kuchini kiriting:</b>\n"
+        "(1 ta item nechta askarga teng)",
+        parse_mode="HTML",
+    )
+
+
+@router.message(StateFilter(AdminState.item_edit_attack))
+async def item_edit_attack_done(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    if not message.text or not message.text.isdigit():
+        await message.answer("❌ Faqat butun son kiriting.")
+        return
+    data = await state.get_data()
+    item_id = data["edit_item_id"]
+    new_val = int(message.text)
+    async with AsyncSessionFactory() as session:
+        repo = CustomItemRepo(session)
+        await repo.update_item(item_id, attack_power=new_val)
+        item = await repo.get_by_id(item_id)
+    await state.clear()
+    await message.answer(
+        f"✅ <b>{item.emoji} {item.name}</b>\n"
+        f"⚔️ Hujum kuchi: <b>{new_val}</b> ga o'zgartirildi.",
+        parse_mode="HTML",
+        reply_markup=item_manage_keyboard(item_id, item.is_active),
+    )
+
+
+@router.callback_query(F.data.startswith("admin:item:edit:defense:"))
+async def item_edit_defense_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    item_id = int(callback.data.split(":")[-1])
+    await state.set_state(AdminState.item_edit_defense)
+    await state.update_data(edit_item_id=item_id)
+    await callback.answer()
+    await callback.message.edit_text(
+        "🛡 <b>Yangi mudofaa kuchini kiriting:</b>\n"
+        "(1 ta item nechta chayonga qarshi tura oladi)",
+        parse_mode="HTML",
+    )
+
+
+@router.message(StateFilter(AdminState.item_edit_defense))
+async def item_edit_defense_done(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    if not message.text or not message.text.isdigit():
+        await message.answer("❌ Faqat butun son kiriting.")
+        return
+    data = await state.get_data()
+    item_id = data["edit_item_id"]
+    new_val = int(message.text)
+    async with AsyncSessionFactory() as session:
+        repo = CustomItemRepo(session)
+        await repo.update_item(item_id, defense_power=new_val)
+        item = await repo.get_by_id(item_id)
+    await state.clear()
+    await message.answer(
+        f"✅ <b>{item.emoji} {item.name}</b>\n"
+        f"🛡 Mudofaa kuchi: <b>{new_val}</b> ga o'zgartirildi.",
+        parse_mode="HTML",
+        reply_markup=item_manage_keyboard(item_id, item.is_active),
+    )
+
+
+@router.callback_query(F.data.startswith("admin:item:edit:price:"))
+async def item_edit_price_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    item_id = int(callback.data.split(":")[-1])
+    await state.set_state(AdminState.item_edit_price)
+    await state.update_data(edit_item_id=item_id)
+    await callback.answer()
+    await callback.message.edit_text(
+        "💰 <b>Yangi narxini kiriting (tanga):</b>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(StateFilter(AdminState.item_edit_price))
+async def item_edit_price_done(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    if not message.text or not message.text.isdigit():
+        await message.answer("❌ Faqat butun son kiriting.")
+        return
+    data = await state.get_data()
+    item_id = data["edit_item_id"]
+    new_val = int(message.text)
+    async with AsyncSessionFactory() as session:
+        repo = CustomItemRepo(session)
+        await repo.update_item(item_id, price=new_val)
+        item = await repo.get_by_id(item_id)
+    await state.clear()
+    await message.answer(
+        f"✅ <b>{item.emoji} {item.name}</b>\n"
+        f"💰 Narxi: <b>{new_val:,}</b> tangaga o'zgartirildi.",
+        parse_mode="HTML",
+        reply_markup=item_manage_keyboard(item_id, item.is_active),
     )
