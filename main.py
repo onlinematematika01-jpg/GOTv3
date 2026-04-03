@@ -9,6 +9,7 @@ from database.engine import create_tables
 from handlers import register_all_handlers
 from middlewares.auth import AuthMiddleware
 from middlewares.logging import LoggingMiddleware
+from middlewares.subscription import SubscriptionMiddleware
 from utils.scheduler import setup_scheduler, set_global_scheduler
 
 logging.basicConfig(
@@ -26,9 +27,11 @@ async def main():
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
 
-    # Middlewares
+    # Middlewares (tartib muhim: avval Subscription, so'ng Auth)
     dp.message.middleware(LoggingMiddleware())
+    dp.message.middleware(SubscriptionMiddleware())   # ← yangi
     dp.message.middleware(AuthMiddleware())
+    dp.callback_query.middleware(SubscriptionMiddleware())  # ← yangi
     dp.callback_query.middleware(AuthMiddleware())
 
     # Register all handlers
