@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo
+from database.repositories import UserRepo, HouseRepo, CustomItemRepo
 from database.models import RoleEnum
 from keyboards import main_menu_keyboard
 
@@ -21,6 +21,7 @@ ROLE_LABELS = {
 async def show_profile(message: Message):
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
+        custom_repo = CustomItemRepo(session)
         user = await user_repo.get_by_id(message.from_user.id)
 
         if not user:
@@ -33,6 +34,13 @@ async def show_profile(message: Message):
 
         treasury = user.house.treasury if user.house else 0
 
+        # Foydalanuvchining custom itemlarini olish
+        user_items = await custom_repo.get_user_items_with_info(user.id)
+        custom_items_text = ""
+        if user_items:
+            parts = [f"{r.item.emoji} {r.item.name}: {r.quantity} ta" for r in user_items]
+            custom_items_text = "\n🎒 <b>Maxsus qurollar:</b>\n  " + "\n  ".join(parts) + "\n"
+
         text = (
             f"👤 <b>{user.full_name}</b>\n"
             f"{'@' + user.username if user.username else ''}\n\n"
@@ -42,7 +50,8 @@ async def show_profile(message: Message):
             f"💰 <b>Xonadon xazinasi:</b> {treasury:,} tanga\n"
             f"🗡️ <b>Askarlar:</b> {user.soldiers:,}\n"
             f"🐉 <b>Ajdarlar:</b> {user.dragons}\n"
-            f"🏹 <b>Skorpionlar:</b> {user.scorpions}\n\n"
+            f"🏹 <b>Skorpionlar:</b> {user.scorpions}\n"
+            f"{custom_items_text}\n"
             f"🏦 <b>Qarz:</b> {user.debt:,} tanga\n"
             f"{'⚠️ <b>SURGUN QILINGAN</b>' if user.is_exiled else ''}"
         )
@@ -56,6 +65,7 @@ async def show_house(message: Message):
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
         house_repo = HouseRepo(session)
+        custom_repo = CustomItemRepo(session)
         user = await user_repo.get_by_id(message.from_user.id)
 
         if not user or not user.house_id:
@@ -78,6 +88,13 @@ async def show_house(message: Message):
             for m in members[:10]
         )
 
+        # Xonadonning custom itemlarini olish
+        house_items = await custom_repo.get_house_items_with_info(house.id)
+        custom_items_text = ""
+        if house_items:
+            parts = [f"{r.item.emoji} {r.item.name}: {r.quantity} ta" for r in house_items]
+            custom_items_text = "\n🎯 <b>Maxsus qurollar:</b>\n  " + "\n  ".join(parts) + "\n"
+
         occ_text = ""
         if house.is_under_occupation:
             occ_text = f"\n⛓️ <b>Bosib olingan!</b> Soliq: {house.permanent_tax_rate*100:.0f}%"
@@ -90,7 +107,8 @@ async def show_house(message: Message):
             f"💰 Xazina: {house.treasury:,} tanga\n"
             f"🗡️ Askarlar: {house.total_soldiers:,}\n"
             f"🐉 Ajdarlar: {house.total_dragons}\n"
-            f"🏹 Skorpionlar: {house.total_scorpions}\n\n"
+            f"🏹 Skorpionlar: {house.total_scorpions}\n"
+            f"{custom_items_text}\n"
             f"👥 A'zolar ({member_count}/10):\n{members_text}"
             f"{occ_text}"
         )
