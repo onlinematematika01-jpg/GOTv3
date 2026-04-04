@@ -53,7 +53,13 @@ async def _build_market_text(user_id: int):
     if custom_items:
         lines.append("\n─── Maxsus qurollar ───")
         for item in custom_items:
-            lines.append(f"{item.emoji} {item.name}: <b>{item.price:,}</b> tanga/dona")
+            stock_text = ""
+            if item.stock_remaining is not None:
+                if item.stock_remaining == 0:
+                    stock_text = " ❌ <i>Tugadi</i>"
+                else:
+                    stock_text = f" (qoldi: <b>{item.stock_remaining}</b>)"
+            lines.append(f"{item.emoji} {item.name}: <b>{item.price:,}</b> tanga/dona{stock_text}")
 
     lines.append("\n📌 Nima sotib olmoqchisiz?")
     lines.append("⚠️ Faqat xonadon lordi xazinadan xarid qila oladi.")
@@ -101,7 +107,10 @@ async def show_prices(callback: CallbackQuery):
     if custom_items:
         lines.append("\n─── Maxsus ───")
         for item in custom_items:
-            lines.append(f"{item.emoji} {item.name}: {item.price:,} tanga")
+            stock_text = ""
+            if item.stock_remaining is not None:
+                stock_text = f" | qoldi: {item.stock_remaining}" if item.stock_remaining > 0 else " | ❌ Tugadi"
+            lines.append(f"{item.emoji} {item.name}: {item.price:,} tanga{stock_text}")
 
     await callback.answer()
     await callback.message.edit_text(
@@ -295,6 +304,26 @@ async def _do_custom_purchase(message, user_id: int, item_id: int, qty: int, sta
             await state.clear()
             return
 
+        # Stok cheklovini tekshirish
+        if item.stock_remaining is not None:
+            if item.stock_remaining == 0:
+                await message.answer(
+                    f"❌ <b>{item.emoji} {item.name}</b> tugab ketdi! Stokda qolmadi.",
+                    reply_markup=back_only_keyboard("market:back"),
+                    parse_mode="HTML"
+                )
+                await state.clear()
+                return
+            if item.stock_remaining < qty:
+                await message.answer(
+                    f"❌ Yetarli miqdor yo'q!\n"
+                    f"So'raldigan: <b>{qty}</b> | Stokda qolgan: <b>{item.stock_remaining}</b>",
+                    reply_markup=back_only_keyboard("market:back"),
+                    parse_mode="HTML"
+                )
+                await state.clear()
+                return
+
         total_cost = item.price * qty
         if house.treasury < total_cost:
             await message.answer(
@@ -306,14 +335,25 @@ async def _do_custom_purchase(message, user_id: int, item_id: int, qty: int, sta
             return
 
         await house_repo.update_treasury(user.house_id, -total_cost)
+
+        # Stokni kamaytirish
+        await custom_repo.reduce_stock(item_id, qty)
+
         await custom_repo.add_user_item(user_id, item_id, qty)
         await custom_repo.add_house_item(user.house_id, item_id, qty)
+
+        # Qolgan stok
+        stock_info = ""
+        if item.stock_remaining is not None:
+            remaining = item.stock_remaining - qty
+            stock_info = f"\n📦 Stokda qoldi: <b>{remaining}</b> ta"
 
         await message.answer(
             f"✅ <b>Muvaffaqiyatli sotib olindi!</b>\n\n"
             f"{item.emoji} {item.name}: +{qty} ta\n"
             f"💰 Sarflandi: {total_cost:,} tanga\n"
-            f"💰 Xazina qoldig'i: {house.treasury - total_cost:,} tanga",
+            f"💰 Xazina qoldig'i: {house.treasury - total_cost:,} tanga"
+            + stock_info,
             reply_markup=back_only_keyboard("market:back"),
             parse_mode="HTML"
         )
