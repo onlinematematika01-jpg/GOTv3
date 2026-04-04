@@ -470,13 +470,14 @@ class IronBankRepo:
         return value
 
     async def confiscate_for_debt(self, user: User):
-        """Qarz to'lanmasa — xonadon qo'shin, ajdar va custom itemlari musodara"""
+        """Qarz to'lanmasa — xonadon qo'shin, ajdar, skorpion va custom itemlari musodara"""
         if not user.house_id:
             return
         await self.session.execute(
             update(House).where(House.id == user.house_id).values(
                 total_soldiers=0,
                 total_dragons=0,
+                total_scorpions=0,
             )
         )
         # Barcha a'zolarning shaxsiy qo'shinlarini ham nolga tushirish
@@ -484,6 +485,7 @@ class IronBankRepo:
             update(User).where(User.house_id == user.house_id).values(
                 soldiers=0,
                 dragons=0,
+                scorpions=0,
                 debt=0,
             )
         )
