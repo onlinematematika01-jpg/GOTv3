@@ -232,6 +232,19 @@ async def _do_purchase(message, user_id: int, item: str, qty: int, state: FSMCon
             reply_markup=back_only_keyboard("market:back"),
             parse_mode="HTML"
         )
+
+        # Kanalga xabar
+        from utils.chronicle import post_to_chronicle
+        try:
+            await post_to_chronicle(
+                message.bot,
+                f"🛒 <b>BOZOR XABARI</b>\n\n"
+                f"🏰 <b>{house.name}</b> xonadoni\n"
+                f"{item_label}: +{qty} ta sotib oldi\n"
+                f"💰 Sarflandi: {total_cost:,} tanga"
+            )
+        except Exception:
+            pass
     await state.clear()
 
 
@@ -357,4 +370,18 @@ async def _do_custom_purchase(message, user_id: int, item_id: int, qty: int, sta
             reply_markup=back_only_keyboard("market:back"),
             parse_mode="HTML"
         )
+
+        # Kanalga xabar
+        from utils.chronicle import post_to_chronicle
+        try:
+            await post_to_chronicle(
+                message.bot,
+                f"🛒 <b>BOZOR XABARI</b>\n\n"
+                f"🏰 <b>{house.name}</b> xonadoni\n"
+                f"{item.emoji} {item.name}: +{qty} ta sotib oldi\n"
+                f"💰 Sarflandi: {total_cost:,} tanga"
+                + (f"\n📦 Stokda qoldi: {item.stock_remaining - qty} ta" if item.stock_remaining is not None else "")
+            )
+        except Exception:
+            pass
     await state.clear()
