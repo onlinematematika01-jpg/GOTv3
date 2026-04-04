@@ -242,5 +242,6 @@ def item_edit_keyboard(item_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⚔️ Hujum kuchini o'zgartir", callback_data=f"admin:item:edit:attack:{item_id}")],
         [InlineKeyboardButton(text="🛡 Mudofaa kuchini o'zgartir", callback_data=f"admin:item:edit:defense:{item_id}")],
         [InlineKeyboardButton(text="💰 Narxini o'zgartir", callback_data=f"admin:item:edit:price:{item_id}")],
+        [InlineKeyboardButton(text="📦 Stokni o'zgartir", callback_data=f"admin:item:edit:stock:{item_id}")],
         [InlineKeyboardButton(text="🔙 Orqaga", callback_data=f"admin:item:info:{item_id}")],
     ])
