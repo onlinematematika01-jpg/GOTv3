@@ -978,10 +978,11 @@ class CustomItemRepo:
         )
         row = result.scalar_one_or_none()
         if row:
-            row.quantity += qty
+            row.quantity = max(0, row.quantity + qty)
         else:
-            row = HouseCustomItem(house_id=house_id, item_id=item_id, quantity=qty)
-            self.session.add(row)
+            if qty > 0:
+                row = HouseCustomItem(house_id=house_id, item_id=item_id, quantity=qty)
+                self.session.add(row)
         await self.session.commit()
 
     async def get_house_items_with_info(self, house_id: int):
