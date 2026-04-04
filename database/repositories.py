@@ -821,13 +821,15 @@ class CustomItemRepo:
 
     async def create_item(
         self, name: str, emoji: str, item_type, attack_power: int,
-        defense_power: int, price: int
+        defense_power: int, price: int, max_stock: int = None
     ):
         from database.models import CustomItem
         item = CustomItem(
             name=name, emoji=emoji, item_type=item_type,
             attack_power=attack_power, defense_power=defense_power,
             price=price, is_active=True,
+            max_stock=max_stock,
+            stock_remaining=max_stock,  # Boshida max_stock bilan teng
         )
         self.session.add(item)
         await self.session.commit()
@@ -854,9 +856,9 @@ class CustomItemRepo:
         return result.scalar_one_or_none()
 
     async def update_item(self, item_id: int, **kwargs):
-        """Item maydonlarini yangilash (attack_power, defense_power, price)"""
+        """Item maydonlarini yangilash (attack_power, defense_power, price, max_stock, stock_remaining)"""
         from database.models import CustomItem
-        allowed = {"attack_power", "defense_power", "price"}
+        allowed = {"attack_power", "defense_power", "price", "max_stock", "stock_remaining"}
         values = {k: v for k, v in kwargs.items() if k in allowed}
         if not values:
             return
@@ -864,6 +866,24 @@ class CustomItemRepo:
             update(CustomItem).where(CustomItem.id == item_id).values(**values)
         )
         await self.session.commit()
+
+    async def reduce_stock(self, item_id: int, qty: int) -> bool:
+        """Stokni kamaytirish. Yetarli stok bo'lmasa False qaytaradi."""
+        from database.models import CustomItem
+        result = await self.session.execute(
+            select(CustomItem).where(CustomItem.id == item_id)
+        )
+        item = result.scalar_one_or_none()
+        if not item:
+            return False
+        # Cheksiz stok
+        if item.stock_remaining is None:
+            return True
+        if item.stock_remaining < qty:
+            return False
+        item.stock_remaining -= qty
+        await self.session.commit()
+        return True
 
     async def toggle_active(self, item_id: int):
         from database.models import CustomItem
@@ -960,6 +980,20 @@ class CustomItemRepo:
             .where(
                 HouseCustomItem.house_id == house_id,
                 HouseCustomItem.quantity > 0,
+            )
+        )
+        return result.scalars().all()
+
+    async def get_user_items_with_info(self, user_id: int):
+        """Foydalanuvchi itemlarini CustomItem ma'lumotlari bilan birga qaytaradi"""
+        from database.models import UserCustomItem
+        from sqlalchemy.orm import selectinload
+        result = await self.session.execute(
+            select(UserCustomItem)
+            .options(selectinload(UserCustomItem.item))
+            .where(
+                UserCustomItem.user_id == user_id,
+                UserCustomItem.quantity > 0,
             )
         )
         return result.scalars().all()
