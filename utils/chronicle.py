@@ -44,7 +44,7 @@ def format_chronicle(event_type: str, **kwargs) -> str:
             "🏆 <b>JANG TUGADI!</b>\n\n"
             "👑 G'olib: <b>{winner}</b>\n"
             "😔 Mag'lub: <b>{loser}</b>\n"
-            "💰 O'lja: {loot} oltin\n"
+            "💰 O'lja: {loot} oltin | 🗡️ {loot_s} askar | 🐉 {loot_d} ajdar\n"
             "⚔️ Hujumchi yo'qotdi: {att_lost_s} askar, {att_lost_d} ajdar\n"
             "🛡️ Mudofaa yo'qotdi: {def_lost_s} askar, {def_lost_d} ajdar"
         ),
