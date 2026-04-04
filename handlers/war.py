@@ -388,6 +388,9 @@ async def do_surrender(callback: CallbackQuery):
                 item_loot_parts.append(f"{row.item.emoji}{row.item.name}×{loot_qty}")
         await session.commit()
 
+        # Agar attacker avval defender vassali bo'lgan bo'lsa — ozod bo'ladi
+        if attacker.is_under_occupation and attacker.occupier_house_id == defender.id:
+            await house_repo.clear_occupation(attacker.id)
         await house_repo.set_occupation(defender.id, attacker.id, tax_rate=0.10)
         await war_repo.end_war(war_id, attacker.id, loot["gold"], surrendered=True)
 
