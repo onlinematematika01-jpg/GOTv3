@@ -199,12 +199,24 @@ async def _run_war(war, bot, session):
     lord_ids = [lid for lid in [attacker.lord_id, defender.lord_id] if lid]
 
     # Boshlang'ich holat xabari
+    from database.repositories import CustomItemRepo as _CIRepo
+    _ci_repo = _CIRepo(session)
+    att_ci = await _ci_repo.get_house_items_with_info(attacker.id)
+    def_ci = await _ci_repo.get_house_items_with_info(defender.id)
+
+    def _fmt_items(items):
+        if not items:
+            return ""
+        return " | " + " ".join(f"{r.item.emoji}{r.item.name}×{r.quantity}" for r in items)
+
     intro = (
         f"⚔️ <b>JANG BOSHLANDI!</b>\n\n"
         f"🔴 <b>{attacker.name}</b>: {attacker.total_soldiers} askar | "
-        f"{attacker.total_dragons} ajdar | {attacker.total_scorpions} skorpion\n"
+        f"{attacker.total_dragons} ajdar | {attacker.total_scorpions} skorpion"
+        f"{_fmt_items(att_ci)}\n"
         f"🔵 <b>{defender.name}</b>: {defender.total_soldiers} askar | "
         f"{defender.total_dragons} ajdar | {defender.total_scorpions} skorpion"
+        f"{_fmt_items(def_ci)}"
     )
     if attacker_allies:
         intro += "\n🤝 Hujumchi ittifoqchilari: " + ", ".join(a.house_name for a in attacker_allies)
@@ -294,6 +306,8 @@ async def _run_war(war, bot, session):
         "war_ended",
         winner=winner.name, loser=loser.name,
         loot=result.loot_gold,
+        loot_s=result.loot_soldiers,
+        loot_d=result.loot_dragons,
         att_lost_s=result.attacker_soldiers_lost,
         att_lost_d=result.attacker_dragons_lost,
         def_lost_s=result.defender_soldiers_lost,
