@@ -229,11 +229,16 @@ async def _run_war(war, bot, session):
     # ── Custom itemlarni xonadonlarga bog'lash (battle uchun) ──────────
     from database.repositories import CustomItemRepo
     custom_repo = CustomItemRepo(session)
-    for house in [attacker, defender]:
-        house_ci = await custom_repo.get_house_items_with_info(house.id)
-        house._custom_items = [
-            {"item": row.item, "qty": row.quantity} for row in house_ci
-        ]
+
+    att_ci_rows = await custom_repo.get_house_items_with_info(attacker.id)
+    def_ci_rows = await custom_repo.get_house_items_with_info(defender.id)
+
+    # Jangdan OLDIN snapshot: {item_id: qty}
+    att_items_before = {row.item_id: row.quantity for row in att_ci_rows}
+    def_items_before = {row.item_id: row.quantity for row in def_ci_rows}
+
+    attacker._custom_items = [{"item": row.item, "qty": row.quantity} for row in att_ci_rows]
+    defender._custom_items = [{"item": row.item, "qty": row.quantity} for row in def_ci_rows]
 
     # Hisob-kitob
     result = calculate_battle(
@@ -242,6 +247,23 @@ async def _run_war(war, bot, session):
         attacker_allies=attacker_allies,
         defender_allies=defender_allies,
     )
+
+    # ── Jangda halok bo'lgan itemlarni DB ga yozish ──────────────────
+    # calculate_battle ichida _custom_items[i]["qty"] yangilangan (kamaytirgan)
+    # Shu farqni DB ga ayiramiz — barcha item turlari (yangi va eskilar) uchun
+    async def _apply_battle_item_losses(house, items_before: dict):
+        """Jangdan keyin _custom_items dagi qty ni DB dagi qty bilan solishtiradi
+        va farqni (yo'qotishni) DB ga yozadi."""
+        items_after = {entry["item"].id: entry["qty"] for entry in (house._custom_items or [])}
+        for item_id, qty_before in items_before.items():
+            qty_after = items_after.get(item_id, 0)
+            lost = qty_before - qty_after
+            if lost > 0:
+                # Manfiy miqdor bilan add_house_item — ayirish
+                await custom_repo.add_house_item(house.id, item_id, -lost)
+
+    await _apply_battle_item_losses(attacker, att_items_before)
+    await _apply_battle_item_losses(defender, def_items_before)
 
     # Lordlarga roundlarni batafsil yuborish
     lord_ids = [lid for lid in [attacker.lord_id, defender.lord_id] if lid]
