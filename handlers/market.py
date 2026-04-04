@@ -154,7 +154,7 @@ async def process_quantity(callback: CallbackQuery, state: FSMContext):
         return
 
     qty = int(qty_str)
-    await _do_purchase(callback.message, callback.from_user.id, item, qty, state)
+    await _do_purchase(callback.message, callback.bot, callback.from_user.id, item, qty, state)
     await callback.answer()
 
 
@@ -169,10 +169,10 @@ async def process_custom_quantity(message: Message, state: FSMContext):
     except (ValueError, TypeError):
         await message.answer("❌ Noto'g'ri son. Iltimos, musbat raqam kiriting.")
         return
-    await _do_purchase(message, message.from_user.id, item, qty, state)
+    await _do_purchase(message, message.bot, message.from_user.id, item, qty, state)
 
 
-async def _do_purchase(message, user_id: int, item: str, qty: int, state: FSMContext):
+async def _do_purchase(message, bot, user_id: int, item: str, qty: int, state: FSMContext):
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
         house_repo = HouseRepo(session)
@@ -237,7 +237,7 @@ async def _do_purchase(message, user_id: int, item: str, qty: int, state: FSMCon
         from utils.chronicle import post_to_chronicle
         try:
             await post_to_chronicle(
-                message.bot,
+                bot,
                 f"🛒 <b>BOZOR XABARI</b>\n\n"
                 f"🏰 <b>{house.name}</b> xonadoni\n"
                 f"{item_label}: +{qty} ta sotib oldi\n"
@@ -280,7 +280,7 @@ async def process_custom_item_qty_btn(callback: CallbackQuery, state: FSMContext
         return
     qty = int(qty_str)
     data = await state.get_data()
-    await _do_custom_purchase(callback.message, callback.from_user.id, data["custom_item_id"], qty, state)
+    await _do_custom_purchase(callback.message, callback.bot, callback.from_user.id, data["custom_item_id"], qty, state)
     await callback.answer()
 
 
@@ -294,10 +294,10 @@ async def process_custom_item_qty_text(message: Message, state: FSMContext):
         await message.answer("❌ Musbat raqam kiriting.")
         return
     data = await state.get_data()
-    await _do_custom_purchase(message, message.from_user.id, data["custom_item_id"], qty, state)
+    await _do_custom_purchase(message, message.bot, message.from_user.id, data["custom_item_id"], qty, state)
 
 
-async def _do_custom_purchase(message, user_id: int, item_id: int, qty: int, state: FSMContext):
+async def _do_custom_purchase(message, bot, user_id: int, item_id: int, qty: int, state: FSMContext):
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
         house_repo = HouseRepo(session)
@@ -375,7 +375,7 @@ async def _do_custom_purchase(message, user_id: int, item_id: int, qty: int, sta
         from utils.chronicle import post_to_chronicle
         try:
             await post_to_chronicle(
-                message.bot,
+                bot,
                 f"🛒 <b>BOZOR XABARI</b>\n\n"
                 f"🏰 <b>{house.name}</b> xonadoni\n"
                 f"{item.emoji} {item.name}: +{qty} ta sotib oldi\n"
