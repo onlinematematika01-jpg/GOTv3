@@ -28,7 +28,11 @@ def get_global_scheduler() -> AsyncIOScheduler:
 
 
 async def daily_farm_job(bot: Bot, scheduled_amount: int = 0):
-    """Kunlik farm: jadval bo'yicha belgilangan miqdorni xonadon xazinasiga qo'shadi"""
+    """Kunlik farm: jadval bo'yicha belgilangan miqdorni xonadon xazinasiga qo'shadi.
+
+    scheduled_amount — admin tomonidan lord uchun belgilangan miqdor.
+    A'zolar har doim settings.MEMBER_DAILY_INCOME (20) tanga tushiradi.
+    """
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
         house_repo = HouseRepo(session)
@@ -37,20 +41,30 @@ async def daily_farm_job(bot: Bot, scheduled_amount: int = 0):
         all_users = result.scalars().all()
 
         # Har xonadon bo'yicha farm summani hisoblash
-        house_farm: dict[int, int] = {}
+        # house_farm_detail: {house_id: {"lord": int, "members": int, "member_count": int, "lord_count": int}}
+        house_farm_detail: dict[int, dict] = {}
         for user in all_users:
             if user.role == RoleEnum.ADMIN or not user.house_id:
                 continue
-            if scheduled_amount > 0:
-                # Admin tomonidan belgilangan miqdor — hamma uchun bir xil
-                amount = scheduled_amount
+            hid = user.house_id
+            if hid not in house_farm_detail:
+                house_farm_detail[hid] = {"lord": 0, "members": 0, "member_count": 0, "lord_count": 0}
+
+            if user.role in [RoleEnum.HIGH_LORD, RoleEnum.LORD]:
+                # Lord uchun: admin belgilagan miqdor yoki default
+                lord_amount = scheduled_amount if scheduled_amount > 0 else settings.LORD_DAILY_INCOME
+                house_farm_detail[hid]["lord"] += lord_amount
+                house_farm_detail[hid]["lord_count"] += 1
             else:
-                amount = 50 if user.role in [RoleEnum.HIGH_LORD, RoleEnum.LORD] else 20
-            house_farm[user.house_id] = house_farm.get(user.house_id, 0) + amount
+                # A'zo uchun: har doim MEMBER_DAILY_INCOME (20 tanga)
+                house_farm_detail[hid]["members"] += settings.MEMBER_DAILY_INCOME
+                house_farm_detail[hid]["member_count"] += 1
 
         # Xazinalarga qo'shish
-        for house_id, total in house_farm.items():
-            await house_repo.update_treasury(house_id, total)
+        for house_id, detail in house_farm_detail.items():
+            total = detail["lord"] + detail["members"]
+            if total > 0:
+                await house_repo.update_treasury(house_id, total)
 
         # O'lpon: vassal (bosib olingan) xonadon Hukmdor xonadoniga xazinasining 10% ini to'laydi
         all_houses = await house_repo.get_all()
@@ -107,21 +121,33 @@ async def daily_farm_job(bot: Bot, scheduled_amount: int = 0):
 
         logger.info("✅ Kunlik farm bajarildi")
 
-        # Xabarnoma — barcha faol a'zolarga
+        # Xabarnoma — barcha faol a'zolarga (to'g'ri miqdorlar bilan)
         for user in all_users:
             if user.role == RoleEnum.ADMIN or not user.house_id:
                 continue
-            if scheduled_amount > 0:
-                amount = scheduled_amount
-            else:
-                amount = 50 if user.role in [RoleEnum.HIGH_LORD, RoleEnum.LORD] else 20
+            hid = user.house_id
+            detail = house_farm_detail.get(hid, {})
             try:
-                await bot.send_message(
-                    user.id,
-                    f"🌾 <b>Kunlik farm!</b>\n"
-                    f"+{amount} tanga xonadon xazinasiga qo'shildi.",
-                    parse_mode="HTML"
-                )
+                if user.role in [RoleEnum.HIGH_LORD, RoleEnum.LORD]:
+                    lord_amount = scheduled_amount if scheduled_amount > 0 else settings.LORD_DAILY_INCOME
+                    member_count = detail.get("member_count", 0)
+                    member_total = detail.get("members", 0)
+                    total_added = detail.get("lord", 0) + member_total
+                    msg = (
+                        f"🌾 <b>Kunlik farm!</b>\n\n"
+                        f"👑 Lord hissasi: +{lord_amount} tanga\n"
+                    )
+                    if member_count > 0:
+                        msg += f"⚔️ A'zolar hissasi ({member_count} kishi): +{member_total} tanga\n"
+                    msg += f"\n💰 Jami xazinaga: +{total_added} tanga"
+                    await bot.send_message(user.id, msg, parse_mode="HTML")
+                else:
+                    await bot.send_message(
+                        user.id,
+                        f"🌾 <b>Kunlik farm!</b>\n"
+                        f"+{settings.MEMBER_DAILY_INCOME} tanga xonadon xazinasiga qo'shildi.",
+                        parse_mode="HTML"
+                    )
             except Exception:
                 pass
 
