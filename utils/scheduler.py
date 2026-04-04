@@ -6,6 +6,7 @@ from database.repositories import UserRepo, HouseRepo, WarRepo, IronBankRepo, Ch
 from database.models import RoleEnum, WarStatusEnum
 from sqlalchemy import select, update
 from database.models import User, House
+from config.settings import settings
 import logging
 from datetime import datetime, timedelta
 
