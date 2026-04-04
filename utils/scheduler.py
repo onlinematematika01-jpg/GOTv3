@@ -68,12 +68,34 @@ async def daily_farm_job(bot: Bot, scheduled_amount: int = 0):
             if actual_tribute > 0:
                 await house_repo.update_treasury(house.id, -actual_tribute)
                 await house_repo.update_treasury(house.occupier_house_id, actual_tribute)
-                # Vassalning lordiga xabar
+
+                # Hukmdor xonadonini topish
+                occupier_result = await session.execute(
+                    select(House).where(House.id == house.occupier_house_id)
+                )
+                occupier = occupier_result.scalar_one_or_none()
+
+                # Vassalning lordiga xabar — kimga to'layotganini bilsin
                 if h.lord_id:
                     try:
                         await bot.send_message(
                             h.lord_id,
-                            f"💸 <b>O'lpon to'landi!</b>\nXazinangizning 10% i ({actual_tribute:,} tanga) hukmdor xonadoniga o'tkazildi.",
+                            f"💸 <b>O'lpon to'landi!</b>\n\n"
+                            f"Xazinangizning 10% i ({actual_tribute:,} tanga)\n"
+                            f"👑 <b>{occupier.name if occupier else 'Hukmdor'}</b> xonadoniga o'tkazildi.",
+                            parse_mode="HTML"
+                        )
+                    except Exception:
+                        pass
+
+                # Hukmdorning lordiga xabar — kimdan olayotganini bilsin
+                if occupier and occupier.lord_id:
+                    try:
+                        await bot.send_message(
+                            occupier.lord_id,
+                            f"💰 <b>O'lpon olindi!</b>\n\n"
+                            f"🏰 <b>{h.name}</b> xonadonidan\n"
+                            f"{actual_tribute:,} tanga xazinangizga o'tkazildi.",
                             parse_mode="HTML"
                         )
                     except Exception:
