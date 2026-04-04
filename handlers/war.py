@@ -80,8 +80,48 @@ def can_declare_war() -> bool:
     return True
 
 
+async def get_war_declare_error_message_async() -> str:
+    """E'lon qilib bo'lmaydigan vaqtda aniq xato xabari (DB dan seanslarni o'qiydi)"""
+    now = datetime.utcnow()
+    local_hour = (now.hour + 5) % 24
+    sessions = await get_war_sessions_from_db()
+
+    # Eng yaqin kelayotgan seansni topish
+    if sessions:
+        starts = sorted(s["start"] for s in sessions)
+        deadlines = sorted(s.get("declare_deadline", s["end"] - 1) for s in sessions)
+        ends = sorted(s["end"] for s in sessions)
+
+        # Hozirgi vaqt biror seans ichidami?
+        for s in sessions:
+            deadline = s.get("declare_deadline", s["end"] - 1)
+            if s["start"] <= local_hour < s["end"]:
+                # Seans ichida, lekin deadline o'tgan
+                return (
+                    f"❌ Urush e'lon qilish muddati o'tdi!\n\n"
+                    f"🕙 Qat'iy qoida: urush faqat <b>{deadline:02d}:00 gacha</b> e'lon qilinishi mumkin.\n"
+                    f"📌 Sabab: mudofaachiga kamida 1 soat (grace period) kafolatlanishi shart.\n\n"
+                    f"⏰ Hozir: {local_hour:02d}:{now.minute:02d}\n"
+                    f"📅 Keyingi seans boshlanishini kuting."
+                )
+
+        # Hech qaysi seans ichida emas — eng yaqin seans boshlanishini ko'rsat
+        next_start = min((s["start"] for s in sessions if s["start"] > local_hour), default=starts[0])
+        return (
+            f"❌ Urush e'lon qilish vaqti emas!\n"
+            f"📅 Urush seanslari: {', '.join(f\"{s[\'start\']:02d}:00–{s[\'end\']:02d}:00\" for s in sessions)}\n"
+            f"⏰ Hozir: {local_hour:02d}:{now.minute:02d}"
+        )
+
+    # DB da seans yo'q — fallback
+    return (
+        f"❌ Urush vaqti emas!\n"
+        f"⏰ Hozir: {local_hour:02d}:{now.minute:02d}"
+    )
+
+
 def get_war_declare_error_message() -> str:
-    """E'lon qilib bo'lmaydigan vaqtda aniq xato xabari"""
+    """E'lon qilib bo'lmaydigan vaqtda aniq xato xabari (settings fallback)"""
     now = datetime.utcnow()
     local_hour = (now.hour + 5) % 24
     if local_hour < settings.WAR_START_HOUR:
@@ -91,7 +131,6 @@ def get_war_declare_error_message() -> str:
             f"⏰ Hozir: {local_hour:02d}:{now.minute:02d}"
         )
     else:
-        # 22:01+ yoki 23:00+
         return (
             f"❌ Urush e'lon qilish muddati o'tdi!\n\n"
             f"🕙 Qat'iy qoida: urush faqat <b>22:00 gacha</b> e'lon qilinishi mumkin.\n"
@@ -120,9 +159,17 @@ async def war_menu(message: Message):
         war_time_ok = await is_war_time_async()
         war_time_text = "✅ Urush vaqti" if war_time_ok else "❌ Urush vaqti emas"
 
+        # DB dan seanslarni olib, ko'rsatish uchun formatlash
+        sessions = await get_war_sessions_from_db()
+        if sessions:
+            sessions_text = ", ".join(f"{s['start']:02d}:00–{s['end']:02d}:00" for s in sessions)
+        else:
+            sessions_text = f"{settings.WAR_START_HOUR:02d}:00–{settings.WAR_END_HOUR:02d}:00"
+
         text = (
             "⚔️ <b>URUSH MARKAZI</b>\n\n"
-            f"🕰️ {war_time_text}\n\n"
+            f"🕰️ {war_time_text}\n"
+            f"📅 Urush seanslari: {sessions_text}\n\n"
         )
 
         if active_war:
@@ -147,7 +194,7 @@ async def war_menu(message: Message):
 @router.callback_query(F.data == "war:declare")
 async def declare_war_start(callback: CallbackQuery, state: FSMContext):
     if not await can_declare_war_async():
-        error_msg = get_war_declare_error_message()
+        error_msg = await get_war_declare_error_message_async()
         await callback.answer(error_msg, show_alert=True)
         return
 
@@ -312,11 +359,15 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
 
     await state.clear()
     await callback.answer()
+    # DB dan urush tugash vaqtini olish
+    _sessions = await get_war_sessions_from_db()
+    _war_ends = " / ".join(f"{s['end']:02d}:00" for s in _sessions) if _sessions else f"{settings.WAR_END_HOUR:02d}:00"
+
     await callback.message.answer(
         f"⚔️ <b>Urush e'lon qilindi!</b>\n\n"
         f"🎯 Maqsad: {defender.name}\n"
         f"⏰ Grace Period: {settings.GRACE_PERIOD_MINUTES} daqiqa\n"
-        f"Muddat: 23:00 gacha",
+        f"Muddat: {_war_ends} gacha",
         parse_mode="HTML"
     )
 
@@ -440,10 +491,17 @@ async def do_fight(callback: CallbackQuery):
             await callback.answer("❌ Urush topilmadi.", show_alert=True)
             return
 
+        # DB dan urush tugash vaqtini olish
+        sessions = await get_war_sessions_from_db()
+        if sessions:
+            war_ends_text = " / ".join(f"{s['end']:02d}:00" for s in sessions)
+        else:
+            war_ends_text = f"{settings.WAR_END_HOUR:02d}:00"
+
         await callback.answer()
         await callback.message.answer(
             "⚔️ <b>Jangga kirishga qaror qildingiz!</b>\n\n"
-            "Urush 23:00 gacha davom etadi va natijalar avtomatik hisoblanadi.\n"
+            f"Urush {war_ends_text} gacha davom etadi va natijalar avtomatik hisoblanadi.\n"
             "Qo'shinlaringizni tayyorlang! 🗡️🐉",
             parse_mode="HTML"
         )
@@ -504,6 +562,10 @@ async def war_fight_button(callback: CallbackQuery):
             await callback.answer("❌ Faol urush yo'q.", show_alert=True)
             return
 
+        # DB dan urush tugash vaqtini olish
+        _sessions = await get_war_sessions_from_db()
+        _war_ends = " / ".join(f"{s['end']:02d}:00" for s in _sessions) if _sessions else f"{settings.WAR_END_HOUR:02d}:00"
+
         if (
             active_war.defender_house_id == user.house_id
             and user.role in [RoleEnum.LORD, RoleEnum.HIGH_LORD, RoleEnum.ADMIN]
@@ -511,7 +573,7 @@ async def war_fight_button(callback: CallbackQuery):
             await callback.answer()
             await callback.message.answer(
                 "⚔️ <b>Jangga kirishni tasdiqlaysizmi?</b>\n\n"
-                "Urush 23:00 gacha davom etadi va natijalar avtomatik hisoblanadi.\n"
+                f"Urush {_war_ends} gacha davom etadi va natijalar avtomatik hisoblanadi.\n"
                 "Taslim bo'lish yoki jangda davom etish — qaror sizniki:",
                 reply_markup=surrender_or_fight_keyboard(active_war.id),
                 parse_mode="HTML"
@@ -520,7 +582,7 @@ async def war_fight_button(callback: CallbackQuery):
             await callback.answer()
             await callback.message.answer(
                 "⚔️ <b>Jang davom etmoqda!</b>\n\n"
-                "Urush 23:00 gacha davom etadi va natijalar avtomatik hisoblanadi.\n"
+                f"Urush {_war_ends} gacha davom etadi va natijalar avtomatik hisoblanadi.\n"
                 "Qo'shinlaringizni tayyorlang! 🗡️🐉",
                 parse_mode="HTML"
             )
