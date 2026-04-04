@@ -61,17 +61,17 @@ def _collect_custom_items(house, allies: list):
             return
         if item.item_type == ItemTypeEnum.ATTACK:
             result["attack"].append({
-                "name": item.name, "emoji": item.emoji,
+                "item_id": item.id, "name": item.name, "emoji": item.emoji,
                 "attack_power": item.attack_power, "qty": qty,
             })
         elif item.item_type == ItemTypeEnum.DEFENSE:
             result["defense"].append({
-                "name": item.name, "emoji": item.emoji,
+                "item_id": item.id, "name": item.name, "emoji": item.emoji,
                 "defense_power": item.defense_power, "qty": qty,
             })
         elif item.item_type == ItemTypeEnum.SOLDIER:
             result["soldier"].append({
-                "name": item.name, "emoji": item.emoji,
+                "item_id": item.id, "name": item.name, "emoji": item.emoji,
                 "attack_power": item.attack_power, "qty": qty,
             })
 
@@ -420,16 +420,25 @@ def calculate_battle(
     # ═══════════════════════════════════════
     # YO'QOTMALAR
     # ═══════════════════════════════════════
-    att_total_start   = attacker_house.total_soldiers + sum(a.soldiers for a in attacker_allies) + att_soldier_item_bonus
-    def_total_start   = defender_house.total_soldiers + sum(a.soldiers for a in defender_allies) + def_soldier_item_bonus
+    att_real_soldiers_start = attacker_house.total_soldiers + sum(a.soldiers for a in attacker_allies)
+    def_real_soldiers_start = defender_house.total_soldiers + sum(a.soldiers for a in defender_allies)
+    att_total_start   = att_real_soldiers_start + att_soldier_item_bonus
+    def_total_start   = def_real_soldiers_start + def_soldier_item_bonus
     att_dragons_start = attacker_house.total_dragons  + sum(a.dragons  for a in attacker_allies)
     def_dragons_start = defender_house.total_dragons  + sum(a.dragons  for a in defender_allies)
 
-    att_soldiers_lost  = max(0, att_total_start - att_soldiers)
+    # Jami yo'qotilgan (askar + item ekvivalenti)
+    att_total_lost = max(0, att_total_start - att_soldiers)
+    def_total_lost = max(0, def_total_start - def_soldiers)
+
+    # Haqiqiy askar yo'qotishlari: item bonusidan ortiq bo'lsa faqat haqiqiy askarlar kamayadi
+    # Item bonusi birinchi "sarf" bo'ladi, keyin haqiqiy askarlar
+    att_soldiers_lost  = max(0, min(att_real_soldiers_start, att_total_lost - att_soldier_item_bonus))
+    def_soldiers_lost  = max(0, min(def_real_soldiers_start, def_total_lost - def_soldier_item_bonus))
+
     att_dragons_lost   = max(0, att_dragons_start - att_dragons)
     att_scorpions_lost = attacker_house.total_scorpions
 
-    def_soldiers_lost  = max(0, def_total_start - def_soldiers)
     def_dragons_lost   = max(0, def_dragons_start - def_dragons)
     def_scorpions_lost = defender_house.total_scorpions
 
