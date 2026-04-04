@@ -50,11 +50,13 @@ class AdminState(StatesGroup):
     item_attack_power = State()
     item_defense_power = State()
     item_price = State()
+    item_stock = State()
     # Item boshqaruvi
     item_manage = State()
     item_edit_attack = State()
     item_edit_defense = State()
     item_edit_price = State()
+    item_edit_stock = State()
 
 
 # ─── BANK LIMIT — runtime o'zgaruvchilar ───
@@ -1567,12 +1569,38 @@ async def item_add_price(message: Message, state: FSMContext):
         await message.answer("❌ Musbat narx kiriting.")
         return
 
+    await state.update_data(item_price=price)
+    await state.set_state(AdminState.item_stock)
+    await message.answer(
+        f"✅ Narxi: <b>{price:,}</b> tanga\n\n"
+        "7️⃣ <b>Maksimal stok miqdorini</b> kiriting:\n"
+        "<i>Bu item jami nechta marta sotilishi mumkin?</i>\n"
+        "<i>Cheksiz bo'lsa — 0 kiriting</i>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(AdminState.item_stock)
+async def item_add_stock(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        stock_val = int(message.text.strip())
+        if stock_val < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ 0 yoki musbat son kiriting. (0 = cheksiz)")
+        return
+
+    max_stock = None if stock_val == 0 else stock_val
+
     data = await state.get_data()
-    name         = data["item_name"]
-    emoji        = data["item_emoji"]
-    itype_str    = data["item_type"]
-    attack_power = data["item_attack_power"]
+    name          = data["item_name"]
+    emoji         = data["item_emoji"]
+    itype_str     = data["item_type"]
+    attack_power  = data["item_attack_power"]
     defense_power = data["item_defense_power"]
+    price         = data["item_price"]
 
     itype_map = {
         "attack":  ItemTypeEnum.ATTACK,
@@ -1587,7 +1615,7 @@ async def item_add_price(message: Message, state: FSMContext):
             item = await repo.create_item(
                 name=name, emoji=emoji, item_type=itype,
                 attack_power=attack_power, defense_power=defense_power,
-                price=price,
+                price=price, max_stock=max_stock,
             )
         except Exception as e:
             await message.answer(f"❌ Xatolik: {e}")
@@ -1596,13 +1624,15 @@ async def item_add_price(message: Message, state: FSMContext):
 
     await state.clear()
     type_label = ITEM_TYPE_LABELS[itype]
+    stock_text = f"{max_stock} ta" if max_stock else "♾ Cheksiz"
     await message.answer(
         f"✅ <b>Yangi item yaratildi!</b>\n\n"
         f"{emoji} <b>{name}</b>\n"
         f"📌 Turi: {type_label}\n"
         f"⚔️ Hujum kuchi: {attack_power} askar ekvivalenti\n"
         f"🛡 Mudofaa kuchi: {defense_power} chayon ekvivalenti\n"
-        f"💰 Narxi: {price:,} tanga\n\n"
+        f"💰 Narxi: {price:,} tanga\n"
+        f"📦 Stok: {stock_text}\n\n"
         f"Item bozorda aktiv holatda qo'shildi.",
         reply_markup=custom_items_menu_keyboard(),
         parse_mode="HTML",
@@ -1634,8 +1664,9 @@ async def item_list(callback: CallbackQuery):
     buttons = []
     for item in items:
         status = "🟢" if item.is_active else "🔴"
+        stock_text = "♾" if item.stock_remaining is None else f"📦{item.stock_remaining}"
         lines.append(
-            f"{status} {item.emoji} <b>{item.name}</b> — {item.price:,} tanga\n"
+            f"{status} {item.emoji} <b>{item.name}</b> — {item.price:,} tanga  {stock_text}\n"
             f"   ⚔️ Hujum: {item.attack_power} | 🛡 Mudofaa: {item.defense_power}"
         )
         buttons.append([InlineKeyboardButton(
@@ -1671,6 +1702,7 @@ async def item_info(callback: CallbackQuery):
 
     type_label = ITEM_TYPE_LABELS.get(item.item_type, str(item.item_type))
     status = "🟢 Aktiv" if item.is_active else "🔴 O'chirilgan"
+    stock_text = "♾ Cheksiz" if item.stock_remaining is None else f"{item.stock_remaining} / {item.max_stock or '?'}"
 
     await callback.answer()
     await callback.message.edit_text(
@@ -1679,6 +1711,7 @@ async def item_info(callback: CallbackQuery):
         f"⚔️ Hujum kuchi: {item.attack_power} askar ekvivalenti\n"
         f"🛡 Mudofaa kuchi: {item.defense_power} chayon ekvivalenti\n"
         f"💰 Narxi: {item.price:,} tanga\n"
+        f"📦 Stok: {stock_text}\n"
         f"📊 Holati: {status}",
         reply_markup=item_manage_keyboard(item.id, item.is_active),
         parse_mode="HTML",
@@ -1744,11 +1777,13 @@ async def item_edit_menu(callback: CallbackQuery):
         await callback.answer("❌ Item topilmadi.", show_alert=True)
         return
     await callback.answer()
+    stock_text = "♾ Cheksiz" if item.stock_remaining is None else f"{item.stock_remaining} / {item.max_stock or '?'}"
     await callback.message.edit_text(
         f"✏️ <b>{item.emoji} {item.name}</b> — tahrirlash\n\n"
         f"⚔️ Hujum kuchi: <b>{item.attack_power}</b>\n"
         f"🛡 Mudofaa kuchi: <b>{item.defense_power}</b>\n"
-        f"💰 Narxi: <b>{item.price:,}</b> tanga\n\n"
+        f"💰 Narxi: <b>{item.price:,}</b> tanga\n"
+        f"📦 Stok: <b>{stock_text}</b>\n\n"
         f"Qaysi maydonni o'zgartirmoqchisiz?",
         reply_markup=item_edit_keyboard(item_id),
         parse_mode="HTML",
@@ -1866,6 +1901,51 @@ async def item_edit_price_done(message: Message, state: FSMContext):
     await message.answer(
         f"✅ <b>{item.emoji} {item.name}</b>\n"
         f"💰 Narxi: <b>{new_val:,}</b> tangaga o'zgartirildi.",
+        parse_mode="HTML",
+        reply_markup=item_manage_keyboard(item_id, item.is_active),
+    )
+
+
+@router.callback_query(F.data.startswith("admin:item:edit:stock:"))
+async def item_edit_stock_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    item_id = int(callback.data.split(":")[-1])
+    await state.set_state(AdminState.item_edit_stock)
+    await state.update_data(edit_item_id=item_id)
+    await callback.answer()
+    await callback.message.edit_text(
+        "📦 <b>Yangi stok miqdorini kiriting:</b>\n"
+        "<i>Jami nechta sotilishi mumkin?</i>\n"
+        "<i>Cheksiz bo'lsa — 0 kiriting</i>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(StateFilter(AdminState.item_edit_stock))
+async def item_edit_stock_done(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        val = int(message.text.strip())
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ 0 yoki musbat son kiriting.")
+        return
+    data = await state.get_data()
+    item_id = data["edit_item_id"]
+    max_stock = None if val == 0 else val
+    async with AsyncSessionFactory() as session:
+        repo = CustomItemRepo(session)
+        await repo.update_item(item_id, max_stock=max_stock, stock_remaining=max_stock)
+        item = await repo.get_by_id(item_id)
+    await state.clear()
+    stock_text = "♾ Cheksiz" if max_stock is None else f"{max_stock} ta"
+    await message.answer(
+        f"✅ <b>{item.emoji} {item.name}</b>\n"
+        f"📦 Stok: <b>{stock_text}</b> ga o'zgartirildi.",
         parse_mode="HTML",
         reply_markup=item_manage_keyboard(item_id, item.is_active),
     )
