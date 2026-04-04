@@ -156,25 +156,39 @@ async def daily_farm_job(bot: Bot, scheduled_amount: int = 0):
 async def _transfer_custom_item_loot(session, loser_id: int, winner_id: int):
     """
     Yutqazgan xonadon custom itemlarining WAR_LOOT_PERCENT (51%) ini
-    g'olib xonadonga o'tkazadi.
+    g'olib xonadonga o'tkazadi. commit() CHAQIRILMAYDI — caller qiladi.
     """
     import math
-    from database.repositories import CustomItemRepo
+    from database.models import HouseCustomItem
+    from sqlalchemy import select as _sa_select
     from config.settings import settings
 
-    repo = CustomItemRepo(session)
-    loser_items = await repo.get_house_items_with_info(loser_id)
+    loser_items_res = await session.execute(
+        _sa_select(HouseCustomItem).where(
+            HouseCustomItem.house_id == loser_id,
+            HouseCustomItem.quantity > 0,
+        )
+    )
+    loser_rows = loser_items_res.scalars().all()
 
-    for row in loser_items:
+    for row in loser_rows:
         loot_qty = math.ceil(row.quantity * settings.WAR_LOOT_PERCENT)
         if loot_qty <= 0:
             continue
         # Yutqazgandan ayirish
         row.quantity = max(0, row.quantity - loot_qty)
         # G'olibga qo'shish
-        await repo.add_house_item(winner_id, row.item_id, loot_qty)
-
-    await session.commit()
+        winner_res = await session.execute(
+            _sa_select(HouseCustomItem).where(
+                HouseCustomItem.house_id == winner_id,
+                HouseCustomItem.item_id == row.item_id,
+            )
+        )
+        winner_row = winner_res.scalar_one_or_none()
+        if winner_row:
+            winner_row.quantity += loot_qty
+        else:
+            session.add(HouseCustomItem(house_id=winner_id, item_id=row.item_id, quantity=loot_qty))
 
 
 async def _run_war(war, bot, session):
@@ -248,22 +262,34 @@ async def _run_war(war, bot, session):
         defender_allies=defender_allies,
     )
 
-    # ── Jangda halok bo'lgan itemlarni DB ga yozish ──────────────────
+    # ── Jangda halok bo'lgan itemlarni DB ga yozish (commit() siz) ─────
     # calculate_battle ichida _custom_items[i]["qty"] yangilangan (kamaytirgan)
     # Shu farqni DB ga ayiramiz — barcha item turlari (yangi va eskilar) uchun
+    from database.models import HouseCustomItem
+    from sqlalchemy import select as _sa_select
+
     async def _apply_battle_item_losses(house, items_before: dict):
         """Jangdan keyin _custom_items dagi qty ni DB dagi qty bilan solishtiradi
-        va farqni (yo'qotishni) DB ga yozadi."""
+        va farqni (yo'qotishni) DB ga yozadi. commit() CHAQIRILMAYDI."""
         items_after = {entry["item"].id: entry["qty"] for entry in (house._custom_items or [])}
         for item_id, qty_before in items_before.items():
             qty_after = items_after.get(item_id, 0)
             lost = qty_before - qty_after
-            if lost > 0:
-                # Manfiy miqdor bilan add_house_item — ayirish
-                await custom_repo.add_house_item(house.id, item_id, -lost)
+            if lost <= 0:
+                continue
+            res = await session.execute(
+                _sa_select(HouseCustomItem).where(
+                    HouseCustomItem.house_id == house.id,
+                    HouseCustomItem.item_id == item_id,
+                )
+            )
+            row = res.scalar_one_or_none()
+            if row:
+                row.quantity = max(0, row.quantity - lost)
 
     await _apply_battle_item_losses(attacker, att_items_before)
     await _apply_battle_item_losses(defender, def_items_before)
+    # commit keyinroq — barcha o'zgarishlar bir session.commit() da saqlanadi
 
     # Lordlarga roundlarni batafsil yuborish
     lord_ids = [lid for lid in [attacker.lord_id, defender.lord_id] if lid]
