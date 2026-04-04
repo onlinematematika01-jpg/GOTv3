@@ -257,6 +257,8 @@ class CustomItem(Base):
     attack_power = Column(Integer, default=0)   # 1 ta bu item nechta askarga teng (hujum)
     defense_power = Column(Integer, default=0)  # 1 ta bu item nechta chayonga qarshi tura oladi
     price = Column(Integer, nullable=False)     # Narxi (tanga)
+    max_stock = Column(Integer, nullable=True)  # Maksimal umumiy miqdor (None = cheksiz)
+    stock_remaining = Column(Integer, nullable=True)  # Qolgan miqdor (None = cheksiz)
     is_active = Column(Boolean, default=True)   # Sotuvda bormi
     created_at = Column(DateTime, server_default=func.now())
 
