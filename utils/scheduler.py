@@ -296,6 +296,11 @@ async def _run_war(war, bot, session):
         await _transfer_custom_item_loot(
             session, loser_id=attacker.id, winner_id=defender.id
         )
+        # Agar defender avval attacker vassali bo'lgan bo'lsa — ozod bo'ladi
+        if defender.is_under_occupation and defender.occupier_house_id == attacker.id:
+            await house_repo.clear_occupation(defender.id)
+        # Attacker endi defender vassaliga aylanadi
+        await house_repo.set_occupation(attacker.id, defender.id, tax_rate=0.10)
 
     # Ittifoqchi yo'qotmalari
     for house_id, losses in result.attacker_ally_losses.items():
