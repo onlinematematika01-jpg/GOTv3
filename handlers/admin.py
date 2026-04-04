@@ -1197,11 +1197,17 @@ async def admin_transfer_execute(callback: CallbackQuery, state: FSMContext):
         # Yangi uyda lord bormi?
         new_role = RoleEnum.LORD if not target_house.lord_id else RoleEnum.MEMBER
 
+        # Foydalanuvchining shaxsiy resurs va qarz maydonlarini nolga tushiramiz
+        # (resurslar xonadonnikiga o'tadi, shaxsiy qator eskirgan ma'lumot bo'lmasin)
         await session.execute(
             sa_update(User).where(User.id == user_id).values(
                 house_id=target_house_id,
                 region=target_house.region,
-                role=new_role
+                role=new_role,
+                soldiers=0,
+                dragons=0,
+                scorpions=0,
+                debt=0,
             )
         )
         if new_role == RoleEnum.LORD:
