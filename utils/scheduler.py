@@ -269,15 +269,20 @@ async def _run_war(war, bot, session):
         await house_repo.update_military(attacker.id,
             soldiers=-result.attacker_soldiers_lost,
             dragons=-result.attacker_dragons_lost,
+            scorpions=-result.attacker_scorpions_lost,
         )
         await house_repo.update_military(defender.id,
             soldiers=-result.defender_soldiers_lost,
             dragons=-result.defender_dragons_lost,
+            scorpions=-result.defender_scorpions_lost,
         )
         # Custom itemlar o'ljasi — g'olib (attacker) yutilgan (defender) itemlarining 51% ini oladi
         await _transfer_custom_item_loot(
             session, loser_id=defender.id, winner_id=attacker.id
         )
+        # Agar attacker avval defender vassali bo'lgan bo'lsa — ozod bo'ladi
+        if attacker.is_under_occupation and attacker.occupier_house_id == defender.id:
+            await house_repo.clear_occupation(attacker.id)
         # Defender vassal bo'ladi — o'lpon tizimi uchun
         await house_repo.set_occupation(defender.id, attacker.id, tax_rate=0.10)
         await _handle_lord_succession(session, war, bot)
@@ -287,10 +292,12 @@ async def _run_war(war, bot, session):
         await house_repo.update_military(attacker.id,
             soldiers=-result.attacker_soldiers_lost,
             dragons=-result.attacker_dragons_lost,
+            scorpions=-result.attacker_scorpions_lost,
         )
         await house_repo.update_military(defender.id,
             soldiers=-result.defender_soldiers_lost,
             dragons=-result.defender_dragons_lost,
+            scorpions=-result.defender_scorpions_lost,
         )
         # Custom itemlar o'ljasi — g'olib (defender) yutilgan (attacker) itemlarining 51% ini oladi
         await _transfer_custom_item_loot(
