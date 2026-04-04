@@ -437,7 +437,7 @@ async def _handle_lord_succession(session, war, bot):
 
 async def check_iron_bank_debt_job(bot: Bot):
     """Har kuni qarzni tekshirish, muddati o'tganlarga jazo berish"""
-    from database.repositories import IronBankRepo, UserRepo
+    from database.repositories import IronBankRepo, UserRepo, HouseRepo
     from sqlalchemy import select
     from database.models import IronBankLoan
 
@@ -453,22 +453,43 @@ async def check_iron_bank_debt_job(bot: Bot):
 
         iron_bank_repo = IronBankRepo(session)
         user_repo = UserRepo(session)
+        house_repo = HouseRepo(session)
+
+        # Bir xonadonga bir marta musodara — house_id bo'yicha deduplikatsiya
+        processed_houses = set()
 
         for loan in overdue:
             user = await user_repo.get_by_id(loan.user_id)
-            if user and user.debt > 0:
-                await iron_bank_repo.confiscate_for_debt(user)
+            if not user or not user.house_id:
+                continue
+            if user.house_id in processed_houses:
+                continue
+
+            house_debt = await iron_bank_repo.get_house_active_debt(user.house_id)
+            if house_debt <= 0:
+                continue
+
+            processed_houses.add(user.house_id)
+            await iron_bank_repo.confiscate_for_debt(user)
+
+            house = await house_repo.get_by_id(user.house_id)
+            house_name = house.name if house else "Xonadon"
+
+            # Xonadonning barcha a'zolariga xabar
+            members = await user_repo.get_house_members(user.house_id)
+            for member in members:
                 try:
                     await bot.send_message(
-                        user.id,
-                        "🏦 <b>TEMIR BANK MUSODARA!</b>\n\n"
-                        "Qarzingiz muddati o'tdi. Barcha qo'shin va ajdarlaringiz musodara qilindi!",
+                        member.id,
+                        f"🏦 <b>TEMIR BANK MUSODARA!</b>\n\n"
+                        f"🏰 <b>{house_name}</b> xonadonining qarzi muddati o'tdi.\n"
+                        f"Barcha qo'shin, ajdar, skorpion va maxsus qurollar musodara qilindi!",
                         parse_mode="HTML"
                     )
                 except Exception:
                     pass
 
-        logger.info(f"Temir Bank tekshiruvi: {len(overdue)} ta muddati o'tgan qarz topildi")
+        logger.info(f"Temir Bank tekshiruvi: {len(processed_houses)} ta xonadon musodara qilindi")
 
 
 async def reload_farm_jobs(bot):
