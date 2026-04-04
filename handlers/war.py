@@ -109,7 +109,7 @@ async def get_war_declare_error_message_async() -> str:
         next_start = min((s["start"] for s in sessions if s["start"] > local_hour), default=starts[0])
         return (
             f"❌ Urush e'lon qilish vaqti emas!\n"
-            f"📅 Urush seanslari: {', '.join(f\"{s[\'start\']:02d}:00–{s[\'end\']:02d}:00\" for s in sessions)}\n"
+            f"📅 Urush seanslari: {', '.join(str(s['start']) + ':00–' + str(s['end']) + ':00' for s in sessions)}\n"
             f"⏰ Hozir: {local_hour:02d}:{now.minute:02d}"
         )
 
