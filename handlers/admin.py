@@ -1764,7 +1764,7 @@ async def item_delete(callback: CallbackQuery):
 
 # ── ITEM TAHRIRLASH ────────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("admin:item:edit:") & ~F.data.startswith("admin:item:edit:attack:") & ~F.data.startswith("admin:item:edit:defense:") & ~F.data.startswith("admin:item:edit:price:"))
+@router.callback_query(F.data.startswith("admin:item:edit:") & ~F.data.startswith("admin:item:edit:attack:") & ~F.data.startswith("admin:item:edit:defense:") & ~F.data.startswith("admin:item:edit:price:") & ~F.data.startswith("admin:item:edit:stock:"))
 async def item_edit_menu(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
@@ -1778,16 +1778,19 @@ async def item_edit_menu(callback: CallbackQuery):
         return
     await callback.answer()
     stock_text = "♾ Cheksiz" if item.stock_remaining is None else f"{item.stock_remaining} / {item.max_stock or '?'}"
-    await callback.message.edit_text(
-        f"✏️ <b>{item.emoji} {item.name}</b> — tahrirlash\n\n"
-        f"⚔️ Hujum kuchi: <b>{item.attack_power}</b>\n"
-        f"🛡 Mudofaa kuchi: <b>{item.defense_power}</b>\n"
-        f"💰 Narxi: <b>{item.price:,}</b> tanga\n"
-        f"📦 Stok: <b>{stock_text}</b>\n\n"
-        f"Qaysi maydonni o'zgartirmoqchisiz?",
-        reply_markup=item_edit_keyboard(item_id),
-        parse_mode="HTML",
-    )
+    try:
+        await callback.message.edit_text(
+            f"✏️ <b>{item.emoji} {item.name}</b> — tahrirlash\n\n"
+            f"⚔️ Hujum kuchi: <b>{item.attack_power}</b>\n"
+            f"🛡 Mudofaa kuchi: <b>{item.defense_power}</b>\n"
+            f"💰 Narxi: <b>{item.price:,}</b> tanga\n"
+            f"📦 Stok: <b>{stock_text}</b>\n\n"
+            f"Qaysi maydonni o'zgartirmoqchisiz?",
+            reply_markup=item_edit_keyboard(item_id),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data.startswith("admin:item:edit:attack:"))
