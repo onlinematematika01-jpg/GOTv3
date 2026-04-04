@@ -142,6 +142,9 @@ def calculate_battle(
     def_items = _collect_custom_items(defender_house, defender_allies)
 
     # SOLDIER itemlarni darhol askarlarga qo'shish (ular hamma roundda askar kabi ishlaydi)
+    att_soldier_item_bonus = sum(it["attack_power"] * it["qty"] for it in att_items["soldier"])
+    def_soldier_item_bonus = sum(it["attack_power"] * it["qty"] for it in def_items["soldier"])
+
     for it in att_items["soldier"]:
         att_soldiers += it["attack_power"] * it["qty"]
     for it in def_items["soldier"]:
@@ -417,8 +420,8 @@ def calculate_battle(
     # ═══════════════════════════════════════
     # YO'QOTMALAR
     # ═══════════════════════════════════════
-    att_total_start   = attacker_house.total_soldiers + sum(a.soldiers for a in attacker_allies)
-    def_total_start   = defender_house.total_soldiers + sum(a.soldiers for a in defender_allies)
+    att_total_start   = attacker_house.total_soldiers + sum(a.soldiers for a in attacker_allies) + att_soldier_item_bonus
+    def_total_start   = defender_house.total_soldiers + sum(a.soldiers for a in defender_allies) + def_soldier_item_bonus
     att_dragons_start = attacker_house.total_dragons  + sum(a.dragons  for a in attacker_allies)
     def_dragons_start = defender_house.total_dragons  + sum(a.dragons  for a in defender_allies)
 
