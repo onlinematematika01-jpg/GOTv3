@@ -220,6 +220,22 @@ async def ally_join_full(callback: CallbackQuery):
             except Exception:
                 pass
 
+        # Kanalga: kim kimga qo'shilgani + yangi kuchlar nisbati
+        from utils.chronicle import post_to_chronicle, post_war_power_update
+        from config.settings import settings as _cfg
+        side_text = "hujumchi" if side == "attacker" else "mudofaachi"
+        main_name = main_house.name
+        ally_text = (
+            f"🤝 <b>ITTIFOQCHI QO'SHILDI!</b>\n\n"
+            f"<b>{house.name}</b> → <b>{main_name}</b> ({side_text}) tomoniga qo'shildi!\n"
+            f"🗡️ {house.total_soldiers} askar | 🏹 {house.total_scorpions} skorpion"
+        )
+        try:
+            await post_to_chronicle(callback.bot, ally_text)
+            await post_war_power_update(callback.bot, war_id)
+        except Exception as e:
+            logger.warning(f"Kanal xabari (ally full) xatosi: {e}")
+
     await callback.answer()
     await callback.message.edit_text(
         f"⚔️ <b>Jangga qo'shildingiz!</b>\n\n"
@@ -351,6 +367,20 @@ async def ally_send_soldiers_confirm(message: Message, state: FSMContext):
                 )
             except Exception:
                 pass
+
+        # Kanalga: kim kimga qo'shilgani + yangi kuchlar nisbati
+        from utils.chronicle import post_to_chronicle, post_war_power_update
+        side_text = "hujumchi" if side == "attacker" else "mudofaachi"
+        ally_text = (
+            f"🤝 <b>ITTIFOQCHI ASKAR YUBORDI!</b>\n\n"
+            f"<b>{house.name}</b> → <b>{main_house.name}</b> ({side_text}) tomonga\n"
+            f"🗡️ {amount} askar yubordi"
+        )
+        try:
+            await post_to_chronicle(message.bot, ally_text)
+            await post_war_power_update(message.bot, war_id)
+        except Exception as e:
+            logger.warning(f"Kanal xabari (ally soldiers) xatosi: {e}")
 
     await state.clear()
     await message.answer(
@@ -495,6 +525,20 @@ async def ally_send_gold_confirm(message: Message, state: FSMContext):
                 )
             except Exception:
                 pass
+
+        # Kanalga: kim kimga oltin bergani + yangi kuchlar nisbati
+        from utils.chronicle import post_to_chronicle, post_war_power_update
+        side_text = "hujumchi" if side == "attacker" else "mudofaachi"
+        ally_text = (
+            f"💰 <b>ITTIFOQCHI OLTIN YUBORDI!</b>\n\n"
+            f"<b>{house.name}</b> → <b>{main_house.name}</b> ({side_text}) tomonga\n"
+            f"💰 {amount} oltin yubordi"
+        )
+        try:
+            await post_to_chronicle(message.bot, ally_text)
+            await post_war_power_update(message.bot, war_id)
+        except Exception as e:
+            logger.warning(f"Kanal xabari (ally gold) xatosi: {e}")
 
     await state.clear()
     await message.answer(
