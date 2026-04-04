@@ -159,6 +159,18 @@ class HouseRepo:
         )
         await self.session.commit()
 
+    async def clear_occupation(self, house_id: int):
+        """Xonadonni vassallikdan ozod qilish"""
+        await self.session.execute(
+            update(House).where(House.id == house_id).values(
+                is_under_occupation=False,
+                occupier_house_id=None,
+                permanent_tax_rate=0.0,
+                vassal_since=None,
+            )
+        )
+        await self.session.commit()
+
 
 class WarRepo:
     def __init__(self, session: AsyncSession):
