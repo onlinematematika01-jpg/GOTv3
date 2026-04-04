@@ -235,7 +235,7 @@ class BotSettings(Base):
     __tablename__ = "bot_settings"
 
     key = Column(String(64), primary_key=True)
-    value = Column(String(256), nullable=False)
+    value = Column(Text, nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
