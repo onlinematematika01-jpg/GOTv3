@@ -1,5 +1,6 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
+from aiogram.exceptions import TelegramBadRequest
 from database.engine import AsyncSessionFactory
 from database.repositories import RatingRepo, CustomItemRepo
 from keyboards import rating_menu_keyboard
@@ -11,6 +12,17 @@ MEDAL = ["🥇", "🥈", "🥉"]
 
 def get_medal(index: int) -> str:
     return MEDAL[index] if index < 3 else f"{index + 1}."
+
+
+async def safe_edit(callback: CallbackQuery, text: str):
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=rating_menu_keyboard(),
+            parse_mode="HTML"
+        )
+    except TelegramBadRequest:
+        pass
 
 
 @router.message(F.text == "🏆 Reyting")
@@ -27,9 +39,8 @@ async def rating_menu(message: Message):
 async def rating_power(callback: CallbackQuery):
     async with AsyncSessionFactory() as session:
         repo = RatingRepo(session)
-        rows = await repo.get_power_ranking()
+        rows = await repo.get_power_ranking(limit=100)
 
-        # Har xonadon uchun custom item kuchlarini hisoblash
         item_repo = CustomItemRepo(session)
         house_item_power: dict[int, dict] = {}
         for row in rows:
@@ -47,8 +58,8 @@ async def rating_power(callback: CallbackQuery):
         total_power = base_power + item_atk + item_def
         house_powers.append((row, total_power, item_atk, item_def, house_item_power[row.id]["items"]))
 
-    # Umumiy kuch bo'yicha qayta tartiblash
     house_powers.sort(key=lambda x: x[1], reverse=True)
+    house_powers = house_powers[:10]
 
     for i, (row, total_power, item_atk, item_def, items) in enumerate(house_powers):
         item_line = ""
@@ -64,11 +75,7 @@ async def rating_power(callback: CallbackQuery):
         )
 
     await callback.answer()
-    await callback.message.edit_text(
-        "\n".join(lines),
-        reply_markup=rating_menu_keyboard(),
-        parse_mode="HTML"
-    )
+    await safe_edit(callback, "\n".join(lines))
 
 
 @router.callback_query(F.data == "rating:soldiers")
@@ -85,11 +92,7 @@ async def rating_soldiers(callback: CallbackQuery):
         )
 
     await callback.answer()
-    await callback.message.edit_text(
-        "\n".join(lines),
-        reply_markup=rating_menu_keyboard(),
-        parse_mode="HTML"
-    )
+    await safe_edit(callback, "\n".join(lines))
 
 
 @router.callback_query(F.data == "rating:gold")
@@ -106,11 +109,7 @@ async def rating_gold(callback: CallbackQuery):
         )
 
     await callback.answer()
-    await callback.message.edit_text(
-        "\n".join(lines),
-        reply_markup=rating_menu_keyboard(),
-        parse_mode="HTML"
-    )
+    await safe_edit(callback, "\n".join(lines))
 
 
 @router.callback_query(F.data == "rating:dragons")
@@ -127,11 +126,7 @@ async def rating_dragons(callback: CallbackQuery):
         )
 
     await callback.answer()
-    await callback.message.edit_text(
-        "\n".join(lines),
-        reply_markup=rating_menu_keyboard(),
-        parse_mode="HTML"
-    )
+    await safe_edit(callback, "\n".join(lines))
 
 
 @router.callback_query(F.data == "rating:wins")
@@ -148,8 +143,4 @@ async def rating_wins(callback: CallbackQuery):
         )
 
     await callback.answer()
-    await callback.message.edit_text(
-        "\n".join(lines),
-        reply_markup=rating_menu_keyboard(),
-        parse_mode="HTML"
-    )
+    await safe_edit(callback, "\n".join(lines))
