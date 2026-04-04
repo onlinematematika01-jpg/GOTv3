@@ -278,6 +278,13 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
         await chronicle_repo.add("war_declared", text,
                                   house_id=attacker_house_id, tg_msg_id=tg_id)
 
+        # Kuchlar nisbatini ham kanalga yuborish
+        from utils.chronicle import post_war_power_update
+        try:
+            await post_war_power_update(bot, war.id)
+        except Exception as e:
+            logger.warning(f"Kuchlar nisbati xabarida xato: {e}")
+
         if defender.lord_id:
             try:
                 await bot.send_message(
