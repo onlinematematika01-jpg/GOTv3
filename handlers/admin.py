@@ -1964,3 +1964,21 @@ async def item_edit_stock_done(message: Message, state: FSMContext):
         parse_mode="HTML",
         reply_markup=item_manage_keyboard(item_id, item.is_active),
     )
+
+
+# ─── Admin: Turnir menyusiga yo'naltirish ─────────────────────────────────────
+
+@router.callback_query(F.data == "admin:tournament")
+async def admin_tournament_redirect(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Yangi Turnir Yaratish", callback_data="tourn:create")],
+        [InlineKeyboardButton(text="▶️ Turnirni Boshlash",    callback_data="tourn:start")],
+        [InlineKeyboardButton(text="🏁 Turnirni Tugatish",    callback_data="tourn:finish")],
+        [InlineKeyboardButton(text="📊 Joriy Holat",          callback_data="tourn:status")],
+        [InlineKeyboardButton(text="🔙 Orqaga",               callback_data="admin:back")],
+    ])
+    await callback.message.edit_text("🏆 <b>Turnir Boshqaruvi</b>", reply_markup=kb, parse_mode="HTML")
+    await callback.answer()
