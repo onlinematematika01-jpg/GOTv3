@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.exceptions import TelegramBadRequest
 from database.engine import AsyncSessionFactory
-from database.repositories import RatingRepo, CustomItemRepo
+from database.repositories import RatingRepo, CustomItemRepo, AllianceGroupRepo
 from keyboards import rating_menu_keyboard
 
 router = Router()
@@ -140,6 +140,31 @@ async def rating_wins(callback: CallbackQuery):
         lines.append(
             f"{get_medal(i)} <b>{house_name}</b>\n"
             f"   🏆 {wins} g'alaba"
+        )
+
+    await callback.answer()
+    await safe_edit(callback, "\n".join(lines))
+
+
+@router.callback_query(F.data == "rating:alliances")
+async def rating_alliances(callback: CallbackQuery):
+    async with AsyncSessionFactory() as session:
+        group_repo = AllianceGroupRepo(session)
+        ranking = await group_repo.get_alliance_power_ranking(limit=10)
+
+    if not ranking:
+        await callback.answer("Hozircha faol ittifoq guruhlari yo'q.", show_alert=True)
+        return
+
+    lines = ["⚔️ <b>KUCHLI ITTIFOQLAR REYTINGI</b>\n"]
+    for i, entry in enumerate(ranking):
+        group = entry["group"]
+        member_names = " · ".join(entry["member_names"])
+        lines.append(
+            f"{get_medal(i)} <b>{group.name}</b>\n"
+            f"   ⚡ {entry['power']:,} kuch  |  👥 {entry['member_count']} xonadon\n"
+            f"   🗡️ {entry['total_soldiers']:,}  🐉 {entry['total_dragons']}  🏹 {entry['total_scorpions']}\n"
+            f"   <i>{member_names}</i>"
         )
 
     await callback.answer()
