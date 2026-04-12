@@ -469,45 +469,8 @@ async def end_war_time_job(bot: Bot):
 
 
 async def _handle_lord_succession(session, war, bot):
-    """Mag'lub lord almashishi"""
-    from database.repositories import UserRepo, HouseRepo
-    from database.models import RoleEnum
-    user_repo = UserRepo(session)
-    house_repo = HouseRepo(session)
-
-    defender = war.defender
-    if not defender.lord_id:
-        return
-
-    old_lord = await user_repo.get_by_id(defender.lord_id)
-    if not old_lord:
-        return
-
-    # Yangi lord topish
-    new_lord = await user_repo.get_most_active_member(defender.id, old_lord.id)
-
-    # Eski lordni surgun qilish
-    attacker = war.attacker
-    await user_repo.exile_user(old_lord, attacker.id)
-
-    if new_lord:
-        new_lord.role = RoleEnum.LORD
-        defender.lord_id = new_lord.id
-        await session.commit()
-
-        try:
-            await bot.send_message(
-                new_lord.id,
-                f"👑 <b>Tabriklaymiz!</b>\nSiz <b>{defender.name}</b> xonadonining yangi Lordi bo'ldingiz!\n"
-                f"Sobiq lord surgun qilindi.",
-                parse_mode="HTML"
-            )
-        except Exception:
-            pass
-    else:
-        # G'olib o'z odamini tayinlaydi (lord_id = None qoladi, keyingi /start da to'ldiriladi)
-        defender.lord_id = None
-        await session.commit()
+    """Mag'lub lord almashishi — o'chirilgan, lord surgun qilinmaydi"""
+    pass
 
 
 async def check_iron_bank_debt_job(bot: Bot):
