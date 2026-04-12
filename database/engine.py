@@ -56,6 +56,7 @@ async def create_tables():
     logger.info("Database jadvallari va migratsiyalar tayyor")
     await _seed_market_prices()
     await _seed_houses()
+    await _migrate_create_alliance_group_tables()
 
 
 async def _migrate_create_enums():
@@ -217,3 +218,40 @@ async def _seed_houses():
 async def get_session() -> AsyncSession:
     async with AsyncSessionFactory() as session:
         yield session
+
+
+async def _migrate_create_alliance_group_tables():
+    """Ittifoq guruhi jadvallarini yaratish (agar mavjud bo'lmasa)"""
+    async with engine.begin() as conn:
+        # alliance_groups
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS alliance_groups (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(64) NOT NULL,
+                leader_house_id INTEGER NOT NULL REFERENCES houses(id),
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT NOW(),
+                disbanded_at TIMESTAMP
+            )
+        """))
+        # alliance_group_members
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS alliance_group_members (
+                id SERIAL PRIMARY KEY,
+                group_id INTEGER NOT NULL REFERENCES alliance_groups(id) ON DELETE CASCADE,
+                house_id INTEGER NOT NULL REFERENCES houses(id),
+                joined_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+        # alliance_group_invites
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS alliance_group_invites (
+                id SERIAL PRIMARY KEY,
+                group_id INTEGER NOT NULL REFERENCES alliance_groups(id) ON DELETE CASCADE,
+                from_house_id INTEGER NOT NULL REFERENCES houses(id),
+                to_house_id INTEGER NOT NULL REFERENCES houses(id),
+                status VARCHAR(16) DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+    logger.info("Migration: ittifoq guruhi jadvallari tayyor")
