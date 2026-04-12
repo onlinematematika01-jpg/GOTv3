@@ -26,6 +26,7 @@ class RoleEnum(str, enum.Enum):
     ADMIN = "admin"
     HIGH_LORD = "high_lord"
     LORD = "lord"
+    KNIGHT = "knight"
     MEMBER = "member"
 
 
@@ -84,6 +85,7 @@ class House(Base):
     total_soldiers = Column(Integer, default=0)
     total_dragons = Column(Integer, default=0)
     total_scorpions = Column(Integer, default=0)
+    knight_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)   # Ritsar
     is_under_occupation = Column(Boolean, default=False)
     occupier_house_id = Column(Integer, ForeignKey("houses.id"), nullable=True)
     permanent_tax_rate = Column(Float, default=0.0)
@@ -93,6 +95,7 @@ class House(Base):
     members = relationship("User", back_populates="house", foreign_keys=[User.house_id])
     lord = relationship("User", foreign_keys=[lord_id])
     high_lord = relationship("User", foreign_keys=[high_lord_id])
+    knight = relationship("User", foreign_keys=[knight_id])
 
 
 class HukmdorClaim(Base):
@@ -331,3 +334,73 @@ class AllianceGroupInvite(Base):
     group = relationship("AllianceGroup")
     from_house = relationship("House", foreign_keys=[from_house_id])
     to_house = relationship("House", foreign_keys=[to_house_id])
+
+
+# ─────────────────────────────────────────────────
+# TURNIR TIZIMi
+# ─────────────────────────────────────────────────
+
+class TournamentStatusEnum(str, enum.Enum):
+    PENDING  = "pending"   # Yaratildi, hali boshlanmagan
+    ACTIVE   = "active"    # Jarayonda
+    FINISHED = "finished"  # Tugadi
+
+
+class Tournament(Base):
+    """Admin tomonidan tashkil qilingan turnir"""
+    __tablename__ = "tournaments"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    title      = Column(String(128), nullable=False)
+    status     = Column(
+        Enum(TournamentStatusEnum, values_callable=lambda x: [e.value for e in x]),
+        default=TournamentStatusEnum.PENDING
+    )
+    prize_1    = Column(BigInteger, default=0)
+    prize_2    = Column(BigInteger, default=0)
+    prize_3    = Column(BigInteger, default=0)
+    starts_at  = Column(DateTime, nullable=True)
+    ends_at    = Column(DateTime, nullable=True)
+    created_by = Column(BigInteger, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    questions  = relationship(
+        "TournamentQuestion", back_populates="tournament",
+        order_by="TournamentQuestion.order_num",
+        cascade="all, delete-orphan"
+    )
+
+
+class TournamentQuestion(Base):
+    """Turnir savoli (variantli)"""
+    __tablename__ = "tournament_questions"
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    tournament_id = Column(Integer, ForeignKey("tournaments.id"), nullable=False)
+    order_num     = Column(Integer, nullable=False, default=1)
+    text          = Column(Text, nullable=False)
+    option_a      = Column(String(256), nullable=False)
+    option_b      = Column(String(256), nullable=False)
+    option_c      = Column(String(256), nullable=True)
+    option_d      = Column(String(256), nullable=True)
+    correct       = Column(String(1), nullable=False)   # "a" | "b" | "c" | "d"
+    points        = Column(Integer, default=1)
+
+    tournament = relationship("Tournament", back_populates="questions")
+    answers    = relationship("TournamentAnswer", back_populates="question",
+                              cascade="all, delete-orphan")
+
+
+class TournamentAnswer(Base):
+    """Ritsar bergan javob"""
+    __tablename__ = "tournament_answers"
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    tournament_id = Column(Integer, ForeignKey("tournaments.id"), nullable=False)
+    question_id   = Column(Integer, ForeignKey("tournament_questions.id"), nullable=False)
+    knight_id     = Column(BigInteger, ForeignKey("users.id"), nullable=False)
+    chosen        = Column(String(1), nullable=False)
+    is_correct    = Column(Boolean, default=False)
+    answered_at   = Column(DateTime, server_default=func.now())
+
+    question = relationship("TournamentQuestion", back_populates="answers")
