@@ -774,7 +774,7 @@ class RatingRepo:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_power_ranking(self, limit: int = 10) -> List[House]:
+    async def get_power_ranking(self, limit: int = 1000) -> List[House]:
         """Umumiy kuch: askarlar + ajdarlar*200 + skorpionlar*25"""
         from sqlalchemy import text
         result = await self.session.execute(
@@ -786,7 +786,7 @@ class RatingRepo:
         )
         return result.scalars().all()
 
-    async def get_soldiers_ranking(self, limit: int = 10) -> List[House]:
+    async def get_soldiers_ranking(self, limit: int = 1000) -> List[House]:
         """Askarlar soni bo'yicha"""
         result = await self.session.execute(
             select(House)
@@ -795,7 +795,7 @@ class RatingRepo:
         )
         return result.scalars().all()
 
-    async def get_gold_ranking(self, limit: int = 10) -> List[House]:
+    async def get_gold_ranking(self, limit: int = 1000) -> List[House]:
         """Xonadon xazinasi bo'yicha"""
         result = await self.session.execute(
             select(House)
@@ -804,7 +804,7 @@ class RatingRepo:
         )
         return result.scalars().all()
 
-    async def get_dragons_ranking(self, limit: int = 10) -> List[House]:
+    async def get_dragons_ranking(self, limit: int = 1000) -> List[House]:
         """Ajdarlar + Skorpionlar bo'yicha"""
         result = await self.session.execute(
             select(House)
@@ -813,7 +813,7 @@ class RatingRepo:
         )
         return result.scalars().all()
 
-    async def get_wins_ranking(self, limit: int = 10) -> List[tuple]:
+    async def get_wins_ranking(self, limit: int = 1000) -> List[tuple]:
         """Urushda g'alaba soniga ko'ra xonadonlar reytingi"""
         result = await self.session.execute(
             select(House.name, func.count(War.id).label("wins"))
