@@ -29,7 +29,8 @@ def rating_menu_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="💰 Oltin", callback_data="rating:gold")
     builder.button(text="🐉 Jangchilar", callback_data="rating:dragons")
     builder.button(text="🏆 Jangda Yutgani", callback_data="rating:wins")
-    builder.adjust(2, 2, 1)
+    builder.button(text="⚔️ Kuchli Ittifoqlar", callback_data="rating:alliances")
+    builder.adjust(2, 2, 2)
     return builder.as_markup()
 
 
@@ -85,10 +86,33 @@ def iron_bank_keyboard() -> InlineKeyboardMarkup:
 
 def diplomacy_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="🤝 Ittifoq Tuzish", callback_data="diplo:alliance")
-    builder.button(text="❌ Ittifoqni Buzish", callback_data="diplo:break")
-    builder.button(text="📋 Ittifoqlarim", callback_data="diplo:list")
+    builder.button(text="🏰 Ittifoq Guruhi", callback_data="diplo:group_menu")
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def alliance_group_menu_keyboard(in_group: bool, is_leader: bool) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if in_group:
+        builder.button(text="📋 Guruh ma'lumotlari", callback_data="diplo:group_info")
+        if is_leader:
+            builder.button(text="📨 Taklif yuborish", callback_data="diplo:group_invite")
+            builder.button(text="✏️ Nom o'zgartirish", callback_data="diplo:group_rename")
+            builder.button(text="💔 Guruhni tarqatish", callback_data="diplo:group_disband")
+        else:
+            builder.button(text="🚪 Guruhdan chiqish", callback_data="diplo:group_leave")
+    else:
+        builder.button(text="➕ Yangi Ittifoq Guruhi Tuzish", callback_data="diplo:group_create")
+    builder.button(text="🔙 Orqaga", callback_data="diplo:back_main")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def alliance_invite_keyboard(invite_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Qabul qilish", callback_data=f"diplo:inv_accept:{invite_id}")
+    builder.button(text="❌ Rad etish", callback_data=f"diplo:inv_reject:{invite_id}")
+    builder.adjust(2)
     return builder.as_markup()
 
 
