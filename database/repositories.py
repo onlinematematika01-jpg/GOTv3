@@ -4,7 +4,8 @@ from sqlalchemy.orm import selectinload
 from database.models import (
     User, House, Alliance, War, IronBankLoan,
     InternalMessage, Chronicle, MarketPrice,
-    RoleEnum, RegionEnum, WarStatusEnum
+    RoleEnum, RegionEnum, WarStatusEnum,
+    AllianceGroup, AllianceGroupMember, AllianceGroupInvite,
 )
 from typing import Optional, List
 import math
@@ -1012,3 +1013,198 @@ class CustomItemRepo:
             )
         )
         return result.scalars().all()
+
+
+class AllianceGroupRepo:
+    """Ittifoq guruhlari bilan ishlash"""
+
+    MAX_MEMBERS = 4  # Tashkilotchi + 3 ta a'zo
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    # ── Mavjudlik tekshiruvlari ──────────────────────────────────────────
+
+    async def get_house_active_group(self, house_id: int) -> Optional[AllianceGroup]:
+        """Xonadon qaysi faol guruhda ekanligini qaytaradi"""
+        result = await self.session.execute(
+            select(AllianceGroup)
+            .join(AllianceGroupMember, AllianceGroupMember.group_id == AllianceGroup.id)
+            .where(
+                AllianceGroupMember.house_id == house_id,
+                AllianceGroup.is_active == True,
+            )
+            .options(
+                selectinload(AllianceGroup.members).selectinload(AllianceGroupMember.house),
+                selectinload(AllianceGroup.leader_house),
+            )
+        )
+        return result.scalars().first()
+
+    async def get_group_by_id(self, group_id: int) -> Optional[AllianceGroup]:
+        result = await self.session.execute(
+            select(AllianceGroup)
+            .where(AllianceGroup.id == group_id, AllianceGroup.is_active == True)
+            .options(
+                selectinload(AllianceGroup.members).selectinload(AllianceGroupMember.house),
+                selectinload(AllianceGroup.leader_house),
+            )
+        )
+        return result.scalars().first()
+
+    async def get_pending_invite(self, group_id: int, to_house_id: int) -> Optional[AllianceGroupInvite]:
+        result = await self.session.execute(
+            select(AllianceGroupInvite).where(
+                AllianceGroupInvite.group_id == group_id,
+                AllianceGroupInvite.to_house_id == to_house_id,
+                AllianceGroupInvite.status == "pending",
+            )
+        )
+        return result.scalars().first()
+
+    async def get_invite_by_id(self, invite_id: int) -> Optional[AllianceGroupInvite]:
+        result = await self.session.execute(
+            select(AllianceGroupInvite)
+            .where(AllianceGroupInvite.id == invite_id)
+            .options(
+                selectinload(AllianceGroupInvite.group).selectinload(AllianceGroup.members),
+                selectinload(AllianceGroupInvite.from_house),
+                selectinload(AllianceGroupInvite.to_house),
+            )
+        )
+        return result.scalars().first()
+
+    # ── Guruh yaratish ───────────────────────────────────────────────────
+
+    async def create_group(self, name: str, leader_house_id: int) -> AllianceGroup:
+        """Yangi ittifoq guruhi yaratish — tashkilotchi avtomatik a'zo bo'ladi"""
+        group = AllianceGroup(name=name, leader_house_id=leader_house_id)
+        self.session.add(group)
+        await self.session.flush()  # group.id kerak
+        member = AllianceGroupMember(group_id=group.id, house_id=leader_house_id)
+        self.session.add(member)
+        await self.session.commit()
+        await self.session.refresh(group)
+        return group
+
+    # ── Taklif yuborish / qabul / rad ───────────────────────────────────
+
+    async def send_invite(self, group_id: int, from_house_id: int, to_house_id: int) -> AllianceGroupInvite:
+        invite = AllianceGroupInvite(
+            group_id=group_id,
+            from_house_id=from_house_id,
+            to_house_id=to_house_id,
+        )
+        self.session.add(invite)
+        await self.session.commit()
+        return invite
+
+    async def accept_invite(self, invite_id: int) -> bool:
+        """Taklifni qabul qilish va guruhga qo'shish. False = joy to'liq"""
+        invite = await self.get_invite_by_id(invite_id)
+        if not invite or invite.status != "pending":
+            return False
+
+        group = await self.get_group_by_id(invite.group_id)
+        if not group:
+            return False
+
+        if len(group.members) >= self.MAX_MEMBERS:
+            invite.status = "rejected"
+            await self.session.commit()
+            return False
+
+        invite.status = "accepted"
+        member = AllianceGroupMember(group_id=invite.group_id, house_id=invite.to_house_id)
+        self.session.add(member)
+        await self.session.commit()
+        return True
+
+    async def reject_invite(self, invite_id: int):
+        result = await self.session.execute(
+            select(AllianceGroupInvite).where(AllianceGroupInvite.id == invite_id)
+        )
+        invite = result.scalars().first()
+        if invite:
+            invite.status = "rejected"
+            await self.session.commit()
+
+    # ── Guruhni tarqatish / a'zolikdan chiqish ──────────────────────────
+
+    async def disband_group(self, group_id: int):
+        """Guruhni to'liq tarqatish (faqat tashkilotchi)"""
+        from datetime import datetime
+        await self.session.execute(
+            update(AllianceGroup)
+            .where(AllianceGroup.id == group_id)
+            .values(is_active=False, disbanded_at=datetime.utcnow())
+        )
+        await self.session.commit()
+
+    async def leave_group(self, group_id: int, house_id: int):
+        """A'zo xonadon guruhdan chiqadi"""
+        from sqlalchemy import delete as sa_delete
+        await self.session.execute(
+            sa_delete(AllianceGroupMember).where(
+                AllianceGroupMember.group_id == group_id,
+                AllianceGroupMember.house_id == house_id,
+            )
+        )
+        await self.session.commit()
+
+    # ── Nom o'zgartirish ─────────────────────────────────────────────────
+
+    async def rename_group(self, group_id: int, new_name: str):
+        await self.session.execute(
+            update(AllianceGroup)
+            .where(AllianceGroup.id == group_id)
+            .values(name=new_name)
+        )
+        await self.session.commit()
+
+    # ── Reyting uchun ────────────────────────────────────────────────────
+
+    async def get_alliance_power_ranking(self, limit: int = 10) -> List[dict]:
+        """
+        Har bir faol ittifoq guruhining umumiy kuchini hisoblaydi.
+        Kuch = barcha a'zo xonadonlarning soldiers + dragons*200 + scorpions*25
+        """
+        result = await self.session.execute(
+            select(AllianceGroup)
+            .where(AllianceGroup.is_active == True)
+            .options(
+                selectinload(AllianceGroup.members).selectinload(AllianceGroupMember.house),
+                selectinload(AllianceGroup.leader_house),
+            )
+        )
+        groups = result.scalars().all()
+
+        ranking = []
+        for group in groups:
+            total_soldiers = 0
+            total_dragons = 0
+            total_scorpions = 0
+            total_treasury = 0
+            member_names = []
+            for m in group.members:
+                h = m.house
+                if h:
+                    total_soldiers += h.total_soldiers
+                    total_dragons += h.total_dragons
+                    total_scorpions += h.total_scorpions
+                    total_treasury += h.treasury
+                    member_names.append(h.name)
+            power = total_soldiers + total_dragons * 200 + total_scorpions * 25
+            ranking.append({
+                "group": group,
+                "power": power,
+                "total_soldiers": total_soldiers,
+                "total_dragons": total_dragons,
+                "total_scorpions": total_scorpions,
+                "total_treasury": total_treasury,
+                "member_names": member_names,
+                "member_count": len(group.members),
+            })
+
+        ranking.sort(key=lambda x: x["power"], reverse=True)
+        return ranking[:limit]
