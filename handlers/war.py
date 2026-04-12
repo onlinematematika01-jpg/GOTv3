@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command
 from datetime import datetime, timedelta
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo, WarRepo, AllianceRepo, ChronicleRepo
+from database.repositories import UserRepo, HouseRepo, WarRepo, AllianceGroupRepo, ChronicleRepo
 from database.models import RoleEnum, WarStatusEnum, WarAllySupport
 from keyboards import war_menu_keyboard, house_list_keyboard, surrender_or_fight_keyboard
 from utils.battle import calculate_battle, calculate_surrender_loot
@@ -240,7 +240,7 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
     async with AsyncSessionFactory() as session:
         war_repo = WarRepo(session)
         house_repo = HouseRepo(session)
-        alliance_repo = AllianceRepo(session)
+        group_repo = AllianceGroupRepo(session)
         chronicle_repo = ChronicleRepo(session)
         user_repo = UserRepo(session)
 
@@ -252,9 +252,18 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
             await state.clear()
             return
 
-        existing_alliance = await alliance_repo.get_active(attacker_house_id, target_house_id)
-        if existing_alliance:
-            await callback.answer("❌ Ittifoqchingizga urush e'lon qila olmaysiz!", show_alert=True)
+        # Guruh a'zosiga urush e'lon qilib bo'lmaydi
+        group_repo = AllianceGroupRepo(session)
+        attacker_group = await group_repo.get_house_active_group(attacker_house_id)
+        defender_group = await group_repo.get_house_active_group(target_house_id)
+        if (
+            attacker_group and defender_group
+            and attacker_group.id == defender_group.id
+        ):
+            await callback.answer(
+                f"❌ «{attacker_group.name}» ittifoq guruhingiz a'zosiga urush e'lon qilib bo'lmaydi!",
+                show_alert=True
+            )
             await state.clear()
             return
 
