@@ -6,7 +6,7 @@ from aiogram.types import Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo, AllianceRepo, WarRepo
+from database.repositories import UserRepo, HouseRepo, WarRepo, AllianceGroupRepo
 from database.models import RoleEnum, WarStatusEnum, WarAllySupport
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
@@ -47,57 +47,62 @@ def ally_support_keyboard(war_id: int, side: str) -> object:
 
 async def notify_allies(bot, war, house, side: str):
     """
-    Xonadon ittifoqchilariga urush haqida xabar yuboradi
-    va yordam so'rash tugmalarini ko'rsatadi.
+    Xonadonning ITTIFOQ GURUHI a'zolariga urush haqida xabar yuboradi.
+    Faqat bir guruhda bo'lgan xonadonlar xabardor qilinadi.
     side = "attacker" | "defender"
-    Urushda bo'lgan ittifoqchilar o'tkazib yuboriladi.
     """
-    # house detach bo'lgan bo'lishi mumkin — id ni oldindan olamiz
-    house_id = house.id if hasattr(house, 'id') else house
+    house_id = house.id if hasattr(house, "id") else house
     war_id = war.id
-    war_attacker_id = war.attacker_house_id
-    war_defender_id = war.defender_house_id
 
     async with AsyncSessionFactory() as session:
-        alliance_repo = AllianceRepo(session)
+        group_repo = AllianceGroupRepo(session)
         house_repo = HouseRepo(session)
         war_repo = WarRepo(session)
 
-        # war obyektini yangi session orqali yuklaymiz
-        from sqlalchemy import select as _select
-        war_result = await session.execute(_select(War).where(War.id == war_id))
-        war = war_result.scalar_one_or_none()
-        if not war:
+        # Urushni qayta yuklaymiz (detached object muammosini oldini olish)
+        war_result = await session.execute(select(War).where(War.id == war_id))
+        war_obj = war_result.scalar_one_or_none()
+        if not war_obj:
             return
 
-        alliances = await alliance_repo.get_all_active_for_house(house_id)
-        if not alliances:
+        # Xonadonning ittifoq guruhini topamiz
+        group = await group_repo.get_house_active_group(house_id)
+        if not group or len(group.members) <= 1:
+            # Guruhda emas yoki yakka — hech kimga xabar yo'q
             return
 
-        # enemy ni ID orqali yuklaymiz — lazy relationship ishlamaydi
-        enemy_house_id = war.defender_house_id if side == "attacker" else war.attacker_house_id
+        enemy_house_id = (
+            war_obj.defender_house_id if side == "attacker"
+            else war_obj.attacker_house_id
+        )
         enemy = await house_repo.get_by_id(enemy_house_id)
-        if not enemy:
+        my_house = await house_repo.get_by_id(house_id)
+        if not enemy or not my_house:
             return
+
         role_text = "hujumchi" if side == "attacker" else "mudofaachi"
 
-        for alliance in alliances:
-            ally_id = alliance.house2_id if alliance.house1_id == house_id else alliance.house1_id
+        # Guruh a'zolariga (o'zimizdan tashqari) xabar yuboramiz
+        for member in group.members:
+            ally_id = member.house_id
+            if ally_id == house_id:
+                continue
+
             ally_house = await house_repo.get_by_id(ally_id)
             if not ally_house or not ally_house.lord_id:
                 continue
 
-            # Allaqachon qo'shilganmi tekshirish
+            # Allaqachon qo'shilganmi
             existing = await session.execute(
                 select(WarAllySupport).where(
-                    WarAllySupport.war_id == war.id,
+                    WarAllySupport.war_id == war_obj.id,
                     WarAllySupport.ally_house_id == ally_id,
                 )
             )
             if existing.scalar_one_or_none():
                 continue
 
-            # Ittifoqchi o'zi urushda bo'lsa — xabar ham yuborilmaydi
+            # O'zi urushda bo'lsa — o'tkazib yuboriladi
             own_war = await war_repo.get_active_war(ally_id)
             if own_war:
                 continue
@@ -105,15 +110,25 @@ async def notify_allies(bot, war, house, side: str):
             try:
                 await bot.send_message(
                     ally_house.lord_id,
-                    f"🤝 <b>ITTIFOQCHI YORDAM SO'RAMOQDA!</b>\n\n"
-                    f"<b>{house.name}</b> xonadoni ({role_text}) "
-                    f"<b>{enemy.name}</b> bilan urushda sizdan yordam so'ramoqda.\n\n"
-                    f"Qanday yordam berasiz?",
-                    reply_markup=ally_support_keyboard(war.id, side),
+                    f"🏰 <b>ITTIFOQ GURUHI YORDAM SO'RAMOQDA!</b>\n\n"
+                    f"«<b>{group.name}</b>» guruhingiz a'zosi\n"
+                    f"<b>{my_house.name}</b> ({role_text}) "
+                    f"<b>{enemy.name}</b> bilan urushda!\n\n"
+                    f"Guruh sifatida qo'llab-quvvatlaysizmi?",
+                    reply_markup=ally_support_keyboard(war_obj.id, side),
                     parse_mode="HTML"
                 )
             except Exception as e:
-                logger.warning(f"Ittifoqchiga xabar yuborishda xato: {e}")
+                logger.warning(f"Guruh a'zosiga xabar yuborishda xato ({ally_id}): {e}")
+
+
+async def _check_group_ally_conflict(session, user_house_id: int, enemy_house_id: int) -> bool:
+    """
+    Agar user guruhida bo'lsa va guruh a'zolaridan biri dushman bilan
+    bir guruhda bo'lsa — xato. Hozircha bunday cheklov qo'yilmagan,
+    lekin kelajakda kerak bo'lsa shu funksiyadan foydalanamiz.
+    """
+    return False
 
 
 @router.callback_query(F.data.startswith("ally:full:"))
@@ -125,6 +140,7 @@ async def ally_join_full(callback: CallbackQuery):
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
         house_repo = HouseRepo(session)
+        group_repo = AllianceGroupRepo(session)
         user = await user_repo.get_by_id(callback.from_user.id)
 
         if not user or user.role not in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
@@ -146,12 +162,12 @@ async def ally_join_full(callback: CallbackQuery):
             await callback.answer("❌ Bu urush allaqachon tugagan.", show_alert=True)
             return
 
-        # C xonadon o'zi urushda bo'lsa — yordamga qo'shila olmaydi
-        war_repo_check = WarRepo(session)
-        own_war = await war_repo_check.get_active_war(user.house_id)
+        # O'zi urushda bo'lsa — yordamga qo'shila olmaydi
+        war_repo = WarRepo(session)
+        own_war = await war_repo.get_active_war(user.house_id)
         if own_war and own_war.id != war_id:
             await callback.answer(
-                "❌ Siz hozir urushda bo'lganlgiz uchun ittifoqchingizga yordam bera olmaysiz.",
+                "❌ Siz hozir urushda bo'lganingiz uchun yordam bera olmaysiz.",
                 show_alert=True
             )
             return
@@ -167,32 +183,19 @@ async def ally_join_full(callback: CallbackQuery):
             await callback.answer("❌ Siz allaqachon bu urushga qo'shilgansiz.", show_alert=True)
             return
 
-        # Ittifoq buzilishi tekshiruvi
-        # Agar side=defender, lekin war.attacker ittifoqchisi bo'lsa → ittifoq buziladi
-        enemy_house_id = war.attacker_house_id if side == "defender" else war.defender_house_id
-        alliance_repo = AllianceRepo(session)
-        enemy_alliance = await alliance_repo.get_active(user.house_id, enemy_house_id)
+        # Guruh tekshiruvi — faqat bir guruh a'zosi yordam bera oladi
+        # Urush e'lon qilgan tomoning guruhiga a'zo bo'lish shart
+        main_house_id = war.attacker_house_id if side == "attacker" else war.defender_house_id
+        ally_group = await group_repo.get_house_active_group(user.house_id)
+        main_group = await group_repo.get_house_active_group(main_house_id)
 
-        if enemy_alliance:
-            # Ittifoqni buzish
-            enemy_house = await house_repo.get_by_id(enemy_house_id)
-            await alliance_repo.break_alliance(enemy_alliance.id)
-            logger.info(f"Ittifoq buzildi: {house.name} vs {enemy_house.name}")
+        if not ally_group or not main_group or ally_group.id != main_group.id:
+            await callback.answer(
+                "❌ Faqat bir xil ittifoq guruhidagi xonadonlar yordam bera oladi.",
+                show_alert=True
+            )
+            return
 
-            # Raqibga xabar
-            if enemy_house and enemy_house.lord_id:
-                try:
-                    await callback.bot.send_message(
-                        enemy_house.lord_id,
-                        f"💔 <b>ITTIFOQ BUZILDI!</b>\n\n"
-                        f"<b>{house.name}</b> xonadoni sizga qarshi urushga qo'shildi!\n"
-                        f"Ittifoqingiz avtomatik bekor qilindi.",
-                        parse_mode="HTML"
-                    )
-                except Exception:
-                    pass
-
-        # Yordam yozish — ajdar YUBORILMAYDI, faqat askar + skorpion
         support = WarAllySupport(
             war_id=war_id,
             ally_house_id=user.house_id,
@@ -206,28 +209,25 @@ async def ally_join_full(callback: CallbackQuery):
         session.add(support)
         await session.commit()
 
-        # Asosiy tomonga xabar
         main_house = war.attacker if side == "attacker" else war.defender
         if main_house.lord_id:
             try:
                 await callback.bot.send_message(
                     main_house.lord_id,
-                    f"🤝 <b>{house.name}</b> jangga qo'shildi!\n"
-                    f"🗡️ +{house.total_soldiers} askar | "
-                    f"🏹 +{house.total_scorpions} skorpion",
+                    f"🤝 <b>«{ally_group.name}»</b> guruhidan\n"
+                    f"<b>{house.name}</b> jangga qo'shildi!\n"
+                    f"🗡️ +{house.total_soldiers} askar | 🏹 +{house.total_scorpions} skorpion",
                     parse_mode="HTML"
                 )
             except Exception:
                 pass
 
-        # Kanalga: kim kimga qo'shilgani + yangi kuchlar nisbati
         from utils.chronicle import post_to_chronicle, post_war_power_update
-        from config.settings import settings as _cfg
         side_text = "hujumchi" if side == "attacker" else "mudofaachi"
-        main_name = main_house.name
         ally_text = (
-            f"🤝 <b>ITTIFOQCHI QO'SHILDI!</b>\n\n"
-            f"<b>{house.name}</b> → <b>{main_name}</b> ({side_text}) tomoniga qo'shildi!\n"
+            f"🤝 <b>ITTIFOQ GURUH A'ZOSI QO'SHILDI!</b>\n\n"
+            f"<b>{house.name}</b> [{ally_group.name}] → "
+            f"<b>{main_house.name}</b> ({side_text}) tomoniga qo'shildi!\n"
             f"🗡️ {house.total_soldiers} askar | 🏹 {house.total_scorpions} skorpion"
         )
         try:
@@ -241,36 +241,54 @@ async def ally_join_full(callback: CallbackQuery):
         f"⚔️ <b>Jangga qo'shildingiz!</b>\n\n"
         f"Askar va skorpionlaringiz urushda ishtirok etadi.\n"
         f"⚠️ Ajdarlar urushga yuborilmaydi.\n"
-        f"G'alaba bo'lsa resurslaringiz qaytadi, "
-        f"mag'lubiyatda yo'qoladi.",
+        f"G'alaba bo'lsa resurslaringiz qaytadi, mag'lubiyatda yo'qoladi.",
         parse_mode="HTML"
     )
 
 
 @router.callback_query(F.data.startswith("ally:soldiers:"))
 async def ally_send_soldiers_start(callback: CallbackQuery, state: FSMContext):
-    """Yordam yuborish — miqdor kiritish"""
+    """Yordam yuborish — askar miqdori kiritish"""
     _, _, war_id, side = callback.data.split(":")
 
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
         house_repo = HouseRepo(session)
+        group_repo = AllianceGroupRepo(session)
         user = await user_repo.get_by_id(callback.from_user.id)
 
         if not user or not user.house_id:
             await callback.answer("❌ Xonadoningiz yo'q.", show_alert=True)
             return
 
-        house = await house_repo.get_by_id(user.house_id)
+        # Guruh tekshiruvi
+        war_result = await session.execute(select(War).where(War.id == int(war_id)))
+        war = war_result.scalar_one_or_none()
+        if not war:
+            await callback.answer("❌ Urush topilmadi.", show_alert=True)
+            return
 
+        main_house_id = war.attacker_house_id if side == "attacker" else war.defender_house_id
+        ally_group = await group_repo.get_house_active_group(user.house_id)
+        main_group = await group_repo.get_house_active_group(main_house_id)
+
+        if not ally_group or not main_group or ally_group.id != main_group.id:
+            await callback.answer(
+                "❌ Faqat bir xil ittifoq guruhidagi xonadonlar yordam bera oladi.",
+                show_alert=True
+            )
+            return
+
+        house = await house_repo.get_by_id(user.house_id)
         await state.set_state(AllySupportState.entering_soldiers)
         await state.update_data(war_id=int(war_id), side=side, house_id=user.house_id)
+        soldiers = house.total_soldiers
 
     await callback.answer()
     await callback.message.edit_text(
         f"🗡️ <b>Nechta askar yubormoqchisiz?</b>\n\n"
-        f"Sizda: {house.total_soldiers} askar mavjud.\n"
-        f"Raqam kiriting (1 — {house.total_soldiers}):",
+        f"Sizda: {soldiers} askar mavjud.\n"
+        f"Raqam kiriting (1 — {soldiers}):",
         parse_mode="HTML"
     )
 
@@ -292,7 +310,7 @@ async def ally_send_soldiers_confirm(message: Message, state: FSMContext):
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
         house_repo = HouseRepo(session)
-        alliance_repo = AllianceRepo(session)
+        group_repo = AllianceGroupRepo(session)
         user = await user_repo.get_by_id(message.from_user.id)
         house = await house_repo.get_by_id(user.house_id)
 
@@ -305,43 +323,26 @@ async def ally_send_soldiers_confirm(message: Message, state: FSMContext):
             .options(selectinload(War.attacker), selectinload(War.defender))
         )
         war = war_result.scalar_one_or_none()
-
         if not war or war.status not in [WarStatusEnum.GRACE_PERIOD, WarStatusEnum.FIGHTING]:
             await message.answer("❌ Bu urush allaqachon tugagan.")
             await state.clear()
             return
 
-        # C xonadon o'zi urushda bo'lsa — yordamga qo'shila olmaydi
-        war_repo_check = WarRepo(session)
-        own_war = await war_repo_check.get_active_war(user.house_id)
+        war_repo = WarRepo(session)
+        own_war = await war_repo.get_active_war(user.house_id)
         if own_war and own_war.id != war_id:
-            await message.answer(
-                "❌ Siz hozir urushda bo'lganlgiz uchun ittifoqchingizga yordam bera olmaysiz."
-            )
+            await message.answer("❌ Siz hozir urushda bo'lganingiz uchun yordam bera olmaysiz.")
             await state.clear()
             return
 
-        # Ittifoq buzilishi tekshiruvi
-        enemy_house_id = war.attacker_house_id if side == "defender" else war.defender_house_id
-        enemy_alliance = await alliance_repo.get_active(user.house_id, enemy_house_id)
+        main_house_id = war.attacker_house_id if side == "attacker" else war.defender_house_id
+        ally_group = await group_repo.get_house_active_group(user.house_id)
+        main_group = await group_repo.get_house_active_group(main_house_id)
+        if not ally_group or not main_group or ally_group.id != main_group.id:
+            await message.answer("❌ Faqat bir xil ittifoq guruhidagi xonadonlar yordam bera oladi.")
+            await state.clear()
+            return
 
-        if enemy_alliance:
-            enemy_house = await house_repo.get_by_id(enemy_house_id)
-            await alliance_repo.break_alliance(enemy_alliance.id)
-
-            if enemy_house and enemy_house.lord_id:
-                try:
-                    await message.bot.send_message(
-                        enemy_house.lord_id,
-                        f"💔 <b>ITTIFOQ BUZILDI!</b>\n\n"
-                        f"<b>{house.name}</b> sizga qarshi urushga askar yubordi!\n"
-                        f"Ittifoqingiz avtomatik bekor qilindi.",
-                        parse_mode="HTML"
-                    )
-                except Exception:
-                    pass
-
-        # Yordam yozish
         support = WarAllySupport(
             war_id=war_id,
             ally_house_id=user.house_id,
@@ -355,25 +356,25 @@ async def ally_send_soldiers_confirm(message: Message, state: FSMContext):
         session.add(support)
         await session.commit()
 
-        # Asosiy tomonga xabar
         main_house = war.attacker if side == "attacker" else war.defender
+        group_name = ally_group.name
         if main_house.lord_id:
             try:
                 await message.bot.send_message(
                     main_house.lord_id,
-                    f"🤝 <b>{house.name}</b> {amount} askar yubordi!\n"
-                    f"G'alaba bo'lsa askarlar qaytadi.",
+                    f"🤝 <b>«{group_name}»</b> guruhidan\n"
+                    f"<b>{house.name}</b> {amount} askar yubordi!",
                     parse_mode="HTML"
                 )
             except Exception:
                 pass
 
-        # Kanalga: kim kimga qo'shilgani + yangi kuchlar nisbati
         from utils.chronicle import post_to_chronicle, post_war_power_update
         side_text = "hujumchi" if side == "attacker" else "mudofaachi"
         ally_text = (
-            f"🤝 <b>ITTIFOQCHI ASKAR YUBORDI!</b>\n\n"
-            f"<b>{house.name}</b> → <b>{main_house.name}</b> ({side_text}) tomonga\n"
+            f"🤝 <b>GURUH A'ZOSI ASKAR YUBORDI!</b>\n\n"
+            f"<b>{house.name}</b> [{group_name}] → "
+            f"<b>{main_house.name}</b> ({side_text}) tomonga\n"
             f"🗡️ {amount} askar yubordi"
         )
         try:
@@ -399,6 +400,7 @@ async def ally_send_gold_start(callback: CallbackQuery, state: FSMContext):
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
         house_repo = HouseRepo(session)
+        group_repo = AllianceGroupRepo(session)
         user = await user_repo.get_by_id(callback.from_user.id)
 
         if not user or not user.house_id:
@@ -409,20 +411,38 @@ async def ally_send_gold_start(callback: CallbackQuery, state: FSMContext):
             await callback.answer("❌ Faqat Lord qaror qabul qila oladi.", show_alert=True)
             return
 
-        house = await house_repo.get_by_id(user.house_id)
+        # Guruh tekshiruvi
+        war_result = await session.execute(select(War).where(War.id == int(war_id)))
+        war = war_result.scalar_one_or_none()
+        if not war:
+            await callback.answer("❌ Urush topilmadi.", show_alert=True)
+            return
 
+        main_house_id = war.attacker_house_id if side == "attacker" else war.defender_house_id
+        ally_group = await group_repo.get_house_active_group(user.house_id)
+        main_group = await group_repo.get_house_active_group(main_house_id)
+
+        if not ally_group or not main_group or ally_group.id != main_group.id:
+            await callback.answer(
+                "❌ Faqat bir xil ittifoq guruhidagi xonadonlar yordam bera oladi.",
+                show_alert=True
+            )
+            return
+
+        house = await house_repo.get_by_id(user.house_id)
         if house.treasury <= 0:
             await callback.answer("❌ Xazinangizda oltin yo'q.", show_alert=True)
             return
 
         await state.set_state(AllySupportState.entering_gold)
         await state.update_data(war_id=int(war_id), side=side, house_id=user.house_id)
+        treasury = house.treasury
 
     await callback.answer()
     await callback.message.edit_text(
         f"💰 <b>Necha oltin yubormoqchisiz?</b>\n\n"
-        f"Xazinada: {house.treasury} oltin mavjud.\n"
-        f"Raqam kiriting (1 — {house.treasury}):",
+        f"Xazinada: {treasury} oltin mavjud.\n"
+        f"Raqam kiriting (1 — {treasury}):",
         parse_mode="HTML"
     )
 
@@ -444,7 +464,7 @@ async def ally_send_gold_confirm(message: Message, state: FSMContext):
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
         house_repo = HouseRepo(session)
-        alliance_repo = AllianceRepo(session)
+        group_repo = AllianceGroupRepo(session)
         user = await user_repo.get_by_id(message.from_user.id)
         house = await house_repo.get_by_id(user.house_id)
 
@@ -457,50 +477,30 @@ async def ally_send_gold_confirm(message: Message, state: FSMContext):
             .options(selectinload(War.attacker), selectinload(War.defender))
         )
         war = war_result.scalar_one_or_none()
-
         if not war or war.status not in [WarStatusEnum.GRACE_PERIOD, WarStatusEnum.FIGHTING]:
             await message.answer("❌ Bu urush allaqachon tugagan.")
             await state.clear()
             return
 
-        # C xonadon o'zi urushda bo'lsa — yordamga qo'shila olmaydi
-        war_repo_check = WarRepo(session)
-        own_war = await war_repo_check.get_active_war(user.house_id)
+        war_repo = WarRepo(session)
+        own_war = await war_repo.get_active_war(user.house_id)
         if own_war and own_war.id != war_id:
-            await message.answer(
-                "❌ Siz hozir urushda bo'lganlgiz uchun ittifoqchingizga yordam bera olmaysiz."
-            )
+            await message.answer("❌ Siz hozir urushda bo'lganingiz uchun yordam bera olmaysiz.")
             await state.clear()
             return
 
-        # Ittifoq buzilishi tekshiruvi
-        enemy_house_id = war.attacker_house_id if side == "defender" else war.defender_house_id
-        enemy_alliance = await alliance_repo.get_active(user.house_id, enemy_house_id)
+        main_house_id = war.attacker_house_id if side == "attacker" else war.defender_house_id
+        ally_group = await group_repo.get_house_active_group(user.house_id)
+        main_group = await group_repo.get_house_active_group(main_house_id)
+        if not ally_group or not main_group or ally_group.id != main_group.id:
+            await message.answer("❌ Faqat bir xil ittifoq guruhidagi xonadonlar yordam bera oladi.")
+            await state.clear()
+            return
 
-        if enemy_alliance:
-            enemy_house = await house_repo.get_by_id(enemy_house_id)
-            await alliance_repo.break_alliance(enemy_alliance.id)
-
-            if enemy_house and enemy_house.lord_id:
-                try:
-                    await message.bot.send_message(
-                        enemy_house.lord_id,
-                        f"💔 <b>ITTIFOQ BUZILDI!</b>\n\n"
-                        f"<b>{house.name}</b> sizga qarshi urushga oltin yubordi!\n"
-                        f"Ittifoqingiz avtomatik bekor qilindi.",
-                        parse_mode="HTML"
-                    )
-                except Exception:
-                    pass
-
-        # Xazinadan oltin ayirish
         await house_repo.update_treasury(house.id, -amount)
-
-        # Asosiy tomonga oltinni o'tkazish
         main_house = war.attacker if side == "attacker" else war.defender
         await house_repo.update_treasury(main_house.id, amount)
 
-        # Yordam yozish (faqat log uchun, oltin allaqachon o'tkazildi)
         support = WarAllySupport(
             war_id=war_id,
             ally_house_id=user.house_id,
@@ -514,24 +514,25 @@ async def ally_send_gold_confirm(message: Message, state: FSMContext):
         session.add(support)
         await session.commit()
 
-        # Asosiy tomonga xabar
+        group_name = ally_group.name
         if main_house.lord_id:
             try:
                 await message.bot.send_message(
                     main_house.lord_id,
-                    f"🤝 <b>{house.name}</b> {amount} oltin yubordi!\n"
+                    f"🤝 <b>«{group_name}»</b> guruhidan\n"
+                    f"<b>{house.name}</b> {amount} oltin yubordi!\n"
                     f"💰 Xazinangizga qo'shildi.",
                     parse_mode="HTML"
                 )
             except Exception:
                 pass
 
-        # Kanalga: kim kimga oltin bergani + yangi kuchlar nisbati
         from utils.chronicle import post_to_chronicle, post_war_power_update
         side_text = "hujumchi" if side == "attacker" else "mudofaachi"
         ally_text = (
-            f"💰 <b>ITTIFOQCHI OLTIN YUBORDI!</b>\n\n"
-            f"<b>{house.name}</b> → <b>{main_house.name}</b> ({side_text}) tomonga\n"
+            f"💰 <b>GURUH A'ZOSI OLTIN YUBORDI!</b>\n\n"
+            f"<b>{house.name}</b> [{group_name}] → "
+            f"<b>{main_house.name}</b> ({side_text}) tomonga\n"
             f"💰 {amount} oltin yubordi"
         )
         try:
