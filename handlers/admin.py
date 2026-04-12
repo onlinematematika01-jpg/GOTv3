@@ -10,7 +10,7 @@ from database.models import RoleEnum, RegionEnum, House
 from keyboards import admin_keyboard, back_only_keyboard
 from config.settings import settings
 from sqlalchemy import select, update, delete, text
-from database.models import User, MarketPrice, IronBankLoan, Alliance, War, Chronicle, InternalMessage
+from database.models import User, MarketPrice, IronBankLoan, Alliance, War, Chronicle, InternalMessage, WarAllySupport, HukmdorClaim, HukmdorClaimResponse, UserCustomItem, HouseCustomItem
 
 router = Router()
 
@@ -505,15 +505,21 @@ async def admin_reset_db_execute(callback: CallbackQuery):
                 is_under_occupation=False,
                 occupier_house_id=None,
                 permanent_tax_rate=0.0,
+                vassal_since=None,
             )
         )
         await session.flush()
-        # 2. Bog'liq jadvallarni tozalash
+        # 2. Bog'liq jadvallarni to'g'ri tartibda tozalash (child -> parent)
+        await session.execute(delete(UserCustomItem))
+        await session.execute(delete(HouseCustomItem))
         await session.execute(delete(IronBankLoan))
         await session.execute(delete(InternalMessage))
         await session.execute(delete(Chronicle))
-        await session.execute(delete(Alliance))
+        await session.execute(delete(WarAllySupport))
         await session.execute(delete(War))
+        await session.execute(delete(HukmdorClaimResponse))
+        await session.execute(delete(HukmdorClaim))
+        await session.execute(delete(Alliance))
         await session.flush()
         # 3. Foydalanuvchilarni o'chirish
         await session.execute(delete(User))
