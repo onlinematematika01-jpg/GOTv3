@@ -287,3 +287,47 @@ class HouseCustomItem(Base):
 
     house = relationship("House")
     item = relationship("CustomItem")
+
+
+class AllianceGroup(Base):
+    """Ittifoq guruhi — 2 dan 4 tagacha xonadon"""
+    __tablename__ = "alliance_groups"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(64), nullable=False)                         # Ittifoq nomi
+    leader_house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)  # Tashkilotchi
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    disbanded_at = Column(DateTime, nullable=True)
+
+    leader_house = relationship("House", foreign_keys=[leader_house_id])
+    members = relationship("AllianceGroupMember", back_populates="group", cascade="all, delete-orphan")
+
+
+class AllianceGroupMember(Base):
+    """Ittifoq guruhiga a'zo xonadon"""
+    __tablename__ = "alliance_group_members"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(Integer, ForeignKey("alliance_groups.id"), nullable=False)
+    house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
+    joined_at = Column(DateTime, server_default=func.now())
+
+    group = relationship("AllianceGroup", back_populates="members")
+    house = relationship("House", foreign_keys=[house_id])
+
+
+class AllianceGroupInvite(Base):
+    """Ittifoq guruhiga taklif"""
+    __tablename__ = "alliance_group_invites"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(Integer, ForeignKey("alliance_groups.id"), nullable=False)
+    from_house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
+    to_house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
+    status = Column(String(16), default="pending")  # pending | accepted | rejected
+    created_at = Column(DateTime, server_default=func.now())
+
+    group = relationship("AllianceGroup")
+    from_house = relationship("House", foreign_keys=[from_house_id])
+    to_house = relationship("House", foreign_keys=[to_house_id])
