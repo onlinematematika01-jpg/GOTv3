@@ -17,6 +17,7 @@ def main_menu_keyboard(role: RoleEnum) -> ReplyKeyboardMarkup:
     builder.row(KeyboardButton(text="🏆 Reyting"))
     if role in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
         builder.row(KeyboardButton(text="👑 Hukmdorlik Da'vosi"))
+        builder.row(KeyboardButton(text="⚔️ Ritsar Saylash"))
     if role in [RoleEnum.ADMIN]:
         builder.row(KeyboardButton(text="🔧 Admin Panel"))
     return builder.as_markup(resize_keyboard=True)
@@ -148,6 +149,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="🔀 A'zo Ko'chirish", callback_data="admin:transfer_member")
     builder.button(text="🗑 Bazani Tozalash", callback_data="admin:reset_db")
     builder.button(text="🧪 Maxsus Itemlar", callback_data="admin:custom_items")
+    builder.button(text="🏆 Turnir boshqaruvi", callback_data="admin:tournament")
     builder.adjust(2)
     return builder.as_markup()
 
