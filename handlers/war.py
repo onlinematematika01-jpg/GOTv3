@@ -204,7 +204,7 @@ async def declare_war_start(callback: CallbackQuery, state: FSMContext):
         house_repo = HouseRepo(session)
         user = await user_repo.get_by_id(callback.from_user.id)
 
-        if not user or user.role not in [RoleEnum.LORD, RoleEnum.HIGH_LORD, RoleEnum.ADMIN]:
+        if not user or user.role not in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
             await callback.answer("❌ Faqat Lordlar urush e'lon qila oladi.", show_alert=True)
             return
 
@@ -222,12 +222,21 @@ async def declare_war_start(callback: CallbackQuery, state: FSMContext):
             await callback.answer("❌ Xonadoningiz topilmadi.", show_alert=True)
             return
 
-        region_houses = await house_repo.get_all_by_region(attacker_house.region)
-        targets = [h for h in region_houses if h.id != user.house_id]
+        # High Lord — barcha hududlarga urush ochishi mumkin
+        # Lord — faqat o'z hududidagi xonadonga urush ochishi mumkin
+        if user.role == RoleEnum.HIGH_LORD:
+            all_houses = await house_repo.get_all()
+            targets = [h for h in all_houses if h.id != user.house_id]
+            hudud_text = "🌍 Barcha hududlar"
+        else:
+            region_houses = await house_repo.get_all_by_region(attacker_house.region)
+            targets = [h for h in region_houses if h.id != user.house_id]
+            hudud_text = f"📍 Hudud: <b>{attacker_house.region.value}</b>"
 
         if not targets:
             await callback.answer(
-                f"❌ {attacker_house.region.value} hududida hujum qilish uchun boshqa xonadon yo'q.",
+                "❌ Hujum qilish uchun boshqa xonadon yo'q." if user.role == RoleEnum.HIGH_LORD
+                else f"❌ {attacker_house.region.value} hududida hujum qilish uchun boshqa xonadon yo'q.",
                 show_alert=True
             )
             return
@@ -238,7 +247,7 @@ async def declare_war_start(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         await callback.message.answer(
             f"🎯 <b>Hujum maqsadini tanlang:</b>\n"
-            f"📍 Hudud: <b>{attacker_house.region.value}</b>",
+            f"{hudud_text}",
             reply_markup=house_list_keyboard(targets, "war:target"),
             parse_mode="HTML"
         )
