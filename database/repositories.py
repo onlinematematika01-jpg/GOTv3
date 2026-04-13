@@ -1018,7 +1018,7 @@ class CustomItemRepo:
 class AllianceGroupRepo:
     """Ittifoq guruhlari bilan ishlash"""
 
-    MAX_MEMBERS = 4  # Tashkilotchi + 3 ta a'zo
+    MAX_MEMBERS = 3  # Tashkilotchi + 2 ta a'zo (faqat bir hududdan)
 
     def __init__(self, session: AsyncSession):
         self.session = session
