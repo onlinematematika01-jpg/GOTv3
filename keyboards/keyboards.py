@@ -150,6 +150,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="🗑 Bazani Tozalash", callback_data="admin:reset_db")
     builder.button(text="🧪 Maxsus Itemlar", callback_data="admin:custom_items")
     builder.button(text="🏆 Turnir boshqaruvi", callback_data="admin:tournament")
+    builder.button(text="☠️ Lord O'ldirish", callback_data="admin:kill_lord")
     builder.adjust(2)
     return builder.as_markup()
 
