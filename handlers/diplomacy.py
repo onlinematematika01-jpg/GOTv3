@@ -12,7 +12,7 @@ from keyboards import (
 
 router = Router()
 
-MAX_MEMBERS = 4
+MAX_MEMBERS = 3
 
 
 class DiploState(StatesGroup):
@@ -33,7 +33,8 @@ async def diplomacy_menu(message: Message):
             return
     await message.answer(
         "🤝 <b>DIPLOMATIYA MARKAZI</b>\n\n"
-        "Ittifoq guruhida 2 dan 4 tagacha xonadon birlashadi.\n"
+        "Ittifoq guruhida 2 dan 3 tagacha xonadon birlashadi.\n"
+        "Faqat <b>bir hududdagi</b> xonadonlar ittifoq tuzishi mumkin.\n"
         "Bir xonadon faqat bitta ittifoq guruhida bo'la oladi.",
         reply_markup=diplomacy_keyboard(),
         parse_mode="HTML"
@@ -46,7 +47,8 @@ async def diplo_back_main(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await callback.message.edit_text(
         "🤝 <b>DIPLOMATIYA MARKAZI</b>\n\n"
-        "Ittifoq guruhida 2 dan 4 tagacha xonadon birlashadi.\n"
+        "Ittifoq guruhida 2 dan 3 tagacha xonadon birlashadi.\n"
+        "Faqat <b>bir hududdagi</b> xonadonlar ittifoq tuzishi mumkin.\n"
         "Bir xonadon faqat bitta ittifoq guruhida bo'la oladi.",
         reply_markup=diplomacy_keyboard(),
         parse_mode="HTML"
@@ -114,9 +116,12 @@ async def group_create_start(callback: CallbackQuery, state: FSMContext):
             await callback.answer("❌ Siz allaqachon ittifoq guruhidasiz.", show_alert=True)
             return
         house_id = user.house_id
+        house_repo = HouseRepo(session)
+        my_house = await house_repo.get_by_id(house_id)
+        house_region = my_house.region if my_house else None
 
     await state.set_state(DiploState.entering_group_name)
-    await state.update_data(house_id=house_id)
+    await state.update_data(house_id=house_id, house_region=house_region.value if house_region else None)
     await callback.answer()
     await callback.message.edit_text(
         "📛 <b>Ittifoq guruhingiz nomini kiriting:</b>\n\n"
@@ -134,6 +139,7 @@ async def group_create_name(message: Message, state: FSMContext):
 
     data = await state.get_data()
     house_id = data["house_id"]
+    house_region = data.get("house_region", "")
 
     async with AsyncSessionFactory() as session:
         group_repo = AllianceGroupRepo(session)
@@ -142,7 +148,8 @@ async def group_create_name(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
         f"✅ <b>«{group.name}»</b> ittifoq guruhi tuzildi!\n\n"
-        f"Endi boshqa xonadonlarga taklif yuborishingiz mumkin.\n"
+        f"📍 Hudud: <b>{house_region}</b>\n"
+        f"Faqat shu hududdagi xonadonlarga taklif yuborishingiz mumkin.\n"
         f"Guruhda maksimal {MAX_MEMBERS} ta xonadon bo'la oladi.",
         parse_mode="HTML",
         reply_markup=alliance_group_menu_keyboard(in_group=True, is_leader=True)
@@ -173,10 +180,14 @@ async def group_invite_start(callback: CallbackQuery, state: FSMContext):
             )
             return
 
+        # Tashkilotchining hududini aniqlash
+        my_house = await house_repo.get_by_id(user.house_id)
+        my_region = my_house.region if my_house else None
+
         member_ids = {m.house_id for m in group.members}
-        all_houses = await house_repo.get_all()
+        region_houses = await house_repo.get_all_by_region(my_region) if my_region else []
         candidates = []
-        for h in all_houses:
+        for h in region_houses:
             if h.id in member_ids:
                 continue
             other_group = await group_repo.get_house_active_group(h.id)
@@ -187,11 +198,12 @@ async def group_invite_start(callback: CallbackQuery, state: FSMContext):
         group_id = group.id
         group_member_count = len(group.members)
         my_house_id = user.house_id
+        region_name = my_region.value if my_region else ""
 
     if not candidates:
         await callback.answer(
-            "❌ Taklif yuborish mumkin bo'lgan xonadon yo'q. "
-            "Boshqa xonadonlar allaqachon ittifoqlarda.",
+            f"❌ {region_name} hududida taklif yuborish mumkin bo'lgan xonadon yo'q. "
+            "Boshqa xonadonlar allaqachon ittifoqlarda yoki bu hududda boshqa xonadon yo'q.",
             show_alert=True
         )
         return
@@ -201,6 +213,7 @@ async def group_invite_start(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await callback.message.edit_text(
         f"📨 <b>Taklif yuborish</b>\n\n"
+        f"📍 Hudud: <b>{region_name}</b>\n"
         f"Guruhda hozir {group_member_count}/{MAX_MEMBERS} ta xonadon bor.\n"
         f"Qaysi xonadonga taklif yuborasiz?",
         reply_markup=house_list_keyboard(candidates, "diplo:inv_send", back_to="diplo:group_menu"),
@@ -239,6 +252,17 @@ async def group_invite_send(callback: CallbackQuery, state: FSMContext):
 
         target_house = await house_repo.get_by_id(target_house_id)
         my_house = await house_repo.get_by_id(my_house_id)
+
+        # Region tekshiruvi
+        if target_house and my_house and target_house.region != my_house.region:
+            await callback.answer(
+                f"❌ Faqat bir hududdagi xonadonlar ittifoq tuzishi mumkin!\n"
+                f"Sizning hududingiz: {my_house.region.value}\n"
+                f"Maqsad hududi: {target_house.region.value}",
+                show_alert=True
+            )
+            await state.clear()
+            return
         invite = await group_repo.send_invite(group_id, my_house_id, target_house_id)
 
         group_name = group.name
@@ -297,6 +321,18 @@ async def invite_accept(callback: CallbackQuery):
             return
         if invite.to_house_id != user.house_id:
             await callback.answer("❌ Bu taklif sizga emas.", show_alert=True)
+            return
+
+        # Region tekshiruvi: taklif yuborgan va qabul qiluvchi bir hududda bo'lishi shart
+        my_house_check = await house_repo.get_by_id(user.house_id)
+        leader_house_check = await house_repo.get_by_id(invite.group.leader_house_id)
+        if my_house_check and leader_house_check and my_house_check.region != leader_house_check.region:
+            await callback.answer(
+                f"❌ Faqat bir hududdagi xonadonlar ittifoq tuzishi mumkin!\n"
+                f"Sizning hududingiz: {my_house_check.region.value}\n"
+                f"Guruh hududi: {leader_house_check.region.value}",
+                show_alert=True
+            )
             return
 
         success = await group_repo.accept_invite(invite_id)
