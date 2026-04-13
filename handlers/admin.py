@@ -1982,3 +1982,120 @@ async def admin_tournament_redirect(callback: CallbackQuery):
     ])
     await callback.message.edit_text("🏆 <b>Turnir Boshqaruvi</b>", reply_markup=kb, parse_mode="HTML")
     await callback.answer()
+
+
+# ─── Admin: Lord O'ldirish ─────────────────────────────────────────────────────
+import asyncio
+
+@router.callback_query(F.data == "admin:kill_lord")
+async def admin_kill_lord_menu(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(
+            select(User).where(
+                User.role == RoleEnum.LORD,
+                User.is_active == True
+            )
+        )
+        lords = result.scalars().all()
+
+    if not lords:
+        await callback.answer("❌ Hozirda lordlar yo'q.", show_alert=True)
+        return
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    buttons = [
+        [InlineKeyboardButton(
+            text=f"☠️ {lord.full_name}",
+            callback_data=f"admin:kill_lord_confirm:{lord.id}"
+        )]
+        for lord in lords
+    ]
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:back")])
+
+    await callback.message.edit_text(
+        "☠️ <b>Qaysi lordni o'ldirish?</b>\n\nTanlangan lord o'ldiriladi va barcha foydalanuvchilarga xabar yuboriladi.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin:kill_lord_confirm:"))
+async def admin_kill_lord_execute(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    lord_id = int(callback.data.split(":")[2])
+
+    async with AsyncSessionFactory() as session:
+        user_repo = UserRepo(session)
+        house_repo = HouseRepo(session)
+
+        lord = await user_repo.get_by_id(lord_id)
+        if not lord or lord.role != RoleEnum.LORD:
+            await callback.answer("❌ Lord topilmadi.", show_alert=True)
+            return
+
+        house = await house_repo.get_by_id(lord.house_id) if lord.house_id else None
+        lord_name = lord.full_name
+        house_name = house.name if house else "Noma'lum xonadon"
+
+        # Lordni o'ldirish: rolini MEMBER ga tushirish, xonadondan chiqarish
+        lord.role = RoleEnum.MEMBER
+        lord.house_id = None
+        lord.region = None
+        if house:
+            house.lord_id = None
+
+        # Xronikaga yozish
+        from database.models import Chronicle
+        chronicle_text = (
+            f"☠️ <b>LORD O'LDIRILDI!</b>\n\n"
+            f"👑 <b>{lord_name}</b> — <b>{house_name}</b> xonadonining lordi\n"
+            f"admin tomonidan o'ldirildi.\n\n"
+            f"🏰 <b>{house_name}</b> xonadoni lordsiz qoldi.\n"
+            f"⚠️ Bu ibratli jazo hamma uchun esda qolsin!"
+        )
+        chronicle = Chronicle(text=chronicle_text)
+        session.add(chronicle)
+        await session.commit()
+
+        # Barcha foydalanuvchilarni olish
+        result = await session.execute(select(User).where(User.is_active == True))
+        all_users = result.scalars().all()
+        all_user_ids = [u.id for u in all_users]
+
+    # Kanalga (xronikaga) yuborish
+    from utils.chronicle import post_to_chronicle
+    await post_to_chronicle(callback.bot, chronicle_text)
+
+    # Barcha foydalanuvchilarga birin-ketin xabar yuborish (sleep bo'lmasin)
+    user_msg = (
+        f"☠️ <b>LORD O'LDIRILDI!</b>\n\n"
+        f"👑 <b>{lord_name}</b> — <b>{house_name}</b> xonadonining lordi\n"
+        f"admin tomonidan o'ldirildi.\n\n"
+        f"⚠️ Bu ibratli jazo hamma uchun esda qolsin!"
+    )
+
+    sent = 0
+    failed = 0
+    for uid in all_user_ids:
+        try:
+            await callback.bot.send_message(uid, user_msg, parse_mode="HTML")
+            sent += 1
+        except Exception:
+            failed += 1
+
+    await callback.message.edit_text(
+        f"✅ <b>{lord_name}</b> o'ldirildi!\n\n"
+        f"📢 Xabar yuborildi: {sent} ta\n"
+        f"❌ Yuborilmadi: {failed} ta\n"
+        f"📜 Xronikaga yozildi.",
+        parse_mode="HTML"
+    )
+    await callback.answer()
