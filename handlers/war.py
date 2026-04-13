@@ -217,15 +217,28 @@ async def declare_war_start(callback: CallbackQuery, state: FSMContext):
             await callback.answer("❌ Allaqachon faol urush mavjud.", show_alert=True)
             return
 
-        all_houses = await house_repo.get_all()
-        targets = [h for h in all_houses if h.id != user.house_id]
+        attacker_house = await house_repo.get_by_id(user.house_id)
+        if not attacker_house:
+            await callback.answer("❌ Xonadoningiz topilmadi.", show_alert=True)
+            return
+
+        region_houses = await house_repo.get_all_by_region(attacker_house.region)
+        targets = [h for h in region_houses if h.id != user.house_id]
+
+        if not targets:
+            await callback.answer(
+                f"❌ {attacker_house.region.value} hududida hujum qilish uchun boshqa xonadon yo'q.",
+                show_alert=True
+            )
+            return
 
         await state.set_state(WarState.selecting_target)
         await state.update_data(attacker_house_id=user.house_id)
 
         await callback.answer()
         await callback.message.answer(
-            "🎯 <b>Hujum maqsadini tanlang:</b>",
+            f"🎯 <b>Hujum maqsadini tanlang:</b>\n"
+            f"📍 Hudud: <b>{attacker_house.region.value}</b>",
             reply_markup=house_list_keyboard(targets, "war:target"),
             parse_mode="HTML"
         )
