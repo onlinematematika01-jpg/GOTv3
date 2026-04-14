@@ -10,7 +10,7 @@ from handlers import register_all_handlers
 from middlewares.auth import AuthMiddleware
 from middlewares.logging import LoggingMiddleware
 from middlewares.subscription import SubscriptionMiddleware
-from utils.scheduler import setup_scheduler, set_global_scheduler
+from utils.scheduler import setup_scheduler, set_global_scheduler, set_global_bot
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,6 +42,7 @@ async def main():
 
     # Scheduler
     set_global_scheduler(scheduler)
+    set_global_bot(bot)
     await setup_scheduler(scheduler, bot)
     scheduler.start()
 
