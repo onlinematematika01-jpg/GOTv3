@@ -210,6 +210,22 @@ async def _run_war(war, bot, session):
     attacker = war.attacker
     defender = war.defender
 
+    # ── Omonatdagi resurslarni jangdan chiqarib qo'yish ──────────────
+    from database.repositories import IronBankDepositRepo
+    dep_repo = IronBankDepositRepo(session)
+    att_deposit = await dep_repo.get_active(attacker.id)
+    def_deposit = await dep_repo.get_active(defender.id)
+
+    if att_deposit:
+        attacker.total_soldiers  = max(0, attacker.total_soldiers  - att_deposit.soldiers)
+        attacker.total_dragons   = max(0, attacker.total_dragons   - att_deposit.dragons)
+        attacker.total_scorpions = max(0, attacker.total_scorpions - att_deposit.scorpions)
+
+    if def_deposit:
+        defender.total_soldiers  = max(0, defender.total_soldiers  - def_deposit.soldiers)
+        defender.total_dragons   = max(0, defender.total_dragons   - def_deposit.dragons)
+        defender.total_scorpions = max(0, defender.total_scorpions - def_deposit.scorpions)
+
     # Ittifoqchi yordamlarini yuklash
     ally_result = await session.execute(
         sa_select(WarAllySupport)
@@ -636,6 +652,15 @@ async def setup_scheduler(scheduler: AsyncIOScheduler, bot: Bot):
         replace_existing=True,
     )
 
+    # Omonat: kunlik foiz + muddat tugaganlarni yopish — har kuni 01:00 Tashkent
+    scheduler.add_job(
+        process_deposits_job,
+        CronTrigger(hour=1, minute=0, timezone="Asia/Tashkent"),
+        args=[bot],
+        id="deposit_check",
+        replace_existing=True,
+    )
+
     logger.info("Scheduler jobs o'rnatildi")
 
 
@@ -731,3 +756,78 @@ async def check_claim_timeouts_job(bot: Bot):
                 await claim_repo.resolve_hukmdor(claim.region, claim.claimant_house_id, bot)
 
             await session.commit()
+
+
+async def process_deposits_job(bot: Bot):
+    """Kunlik foiz to'lash + muddat tugagan omonatlarni avtomatik yopish"""
+    from database.repositories import IronBankDepositRepo
+    from datetime import datetime
+
+    logger.info("Omonat tekshiruvi boshlandi...")
+    async with AsyncSessionFactory() as session:
+        dep_repo = IronBankDepositRepo(session)
+        deposits = await dep_repo.get_all_active()
+
+    for dep in deposits:
+        try:
+            async with AsyncSessionFactory() as session:
+                dep_repo = IronBankDepositRepo(session)
+                # Faol omonatni qayta olish (session fresh bo'lishi uchun)
+                from database.models import IronBankDeposit
+                result = await session.execute(
+                    select(IronBankDeposit).where(
+                        IronBankDeposit.id == dep.id,
+                        IronBankDeposit.is_active == True
+                    )
+                )
+                fresh_dep = result.scalar_one_or_none()
+                if not fresh_dep:
+                    continue
+
+                now = datetime.utcnow()
+
+                if now >= fresh_dep.expires_at:
+                    # Muddat tugadi — yopish + to'liq foiz
+                    interest = await dep_repo.close(fresh_dep, pay_interest=True)
+                    logger.info(f"Omonat #{fresh_dep.id} yopildi. Foiz: {interest}")
+                    # Xonadonga xabar
+                    try:
+                        house_repo = HouseRepo(session)
+                        house = await house_repo.get_by_id(fresh_dep.house_id)
+                        if house and house.lord_id:
+                            await bot.send_message(
+                                house.lord_id,
+                                f"🏦 <b>Omonat muddati tugadi!</b>\n\n"
+                                f"💰 Oltin qaytarildi: {fresh_dep.gold:,} tanga\n"
+                                f"🗡️ Askarlar: {fresh_dep.soldiers:,}\n"
+                                f"🐉 Ajdarlar: {fresh_dep.dragons:,}\n"
+                                f"🏹 Skorpionlar: {fresh_dep.scorpions:,}\n"
+                                f"📈 Foiz daromadi: +{interest:,} tanga\n\n"
+                                f"✅ Barcha resurslar xazinangizga qaytarildi!",
+                                parse_mode="HTML"
+                            )
+                    except Exception:
+                        pass
+                else:
+                    # Muddat tugamagan — kunlik foiz to'lash
+                    interest = await dep_repo.pay_daily_interest(fresh_dep)
+                    logger.info(f"Omonat #{fresh_dep.id} kunlik foiz: +{interest}")
+                    if interest > 0:
+                        try:
+                            house_repo = HouseRepo(session)
+                            house = await house_repo.get_by_id(fresh_dep.house_id)
+                            if house and house.lord_id:
+                                days_left = max(0, (fresh_dep.expires_at - now).days)
+                                await bot.send_message(
+                                    house.lord_id,
+                                    f"🏦 <b>Omonat kunlik foizi keldi!</b>\n\n"
+                                    f"📈 +{interest:,} tanga xazinangizga tushdi\n"
+                                    f"⏳ Omonat tugashiga: {days_left} kun",
+                                    parse_mode="HTML"
+                                )
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.error(f"Omonat #{dep.id} tekshiruvida xato: {e}")
+
+    logger.info("Omonat tekshiruvi yakunlandi.")
