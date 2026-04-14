@@ -31,7 +31,8 @@ def rating_menu_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="🐉 Jangchilar", callback_data="rating:dragons")
     builder.button(text="🏆 Jangda Yutgani", callback_data="rating:wins")
     builder.button(text="⚔️ Kuchli Ittifoqlar", callback_data="rating:alliances")
-    builder.adjust(2, 2, 2)
+    builder.button(text="🏦 Omonatlar", callback_data="rating:deposit")
+    builder.adjust(2, 2, 2, 1)
     return builder.as_markup()
 
 
