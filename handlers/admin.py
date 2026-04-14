@@ -2061,7 +2061,7 @@ async def admin_kill_lord_execute(callback: CallbackQuery):
             f"🏰 <b>{house_name}</b> xonadoni lordsiz qoldi.\n"
             f"⚠️ Bu ibratli jazo hamma uchun esda qolsin!"
         )
-        chronicle = Chronicle(text=chronicle_text)
+        chronicle = Chronicle(event_type="lord_killed", description=chronicle_text)
         session.add(chronicle)
         await session.commit()
 
