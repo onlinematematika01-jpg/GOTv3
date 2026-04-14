@@ -792,17 +792,18 @@ async def process_deposits_job(bot: Bot):
                 house_repo = HouseRepo(session)
                 now = datetime.utcnow()
 
-                # Harbiy ekvivalent va asl oltin
-                mil_val = (
-                    dep.soldiers  * cfg.SOLDIER_PRICE +
-                    dep.dragons   * cfg.DRAGON_PRICE  +
-                    dep.scorpions * cfg.SCORPION_PRICE
-                )
-                pure_gold = max(0, dep.gold - mil_val)
+                # Joriy bozor narxlari
+                from database.repositories import MarketRepo
+                market_repo = MarketRepo(session)
+                prices = await market_repo.get_all_prices()
+                s_price  = prices.get("soldier",  cfg.SOLDIER_PRICE)
+                d_price  = prices.get("dragon",   cfg.DRAGON_PRICE)
+                sc_price = prices.get("scorpion", cfg.SCORPION_PRICE)
 
                 if now >= dep.expires_at:
                     # Muddat tugadi — yopish
-                    interest = await dep_repo.close(dep, pay_interest=True)
+                    interest = await dep_repo.close(dep, pay_interest=True,
+                                                    s_price=s_price, d_price=d_price, sc_price=sc_price)
                     logger.info(f"Omonat #{dep_id} yopildi. Foiz: {interest}")
                     house = await house_repo.get_by_id(dep.house_id)
                     if house and house.lord_id:
@@ -810,7 +811,7 @@ async def process_deposits_job(bot: Bot):
                             await bot.send_message(
                                 house.lord_id,
                                 f"🏦 <b>Omonat muddati tugadi!</b>\n\n"
-                                f"💰 Oltin qaytarildi: {pure_gold:,} tanga\n"
+                                f"💰 Oltin qaytarildi: {dep.gold:,} tanga\n"
                                 f"🗡️ Askarlar: {dep.soldiers:,}\n"
                                 f"🐉 Ajdarlar: {dep.dragons:,}\n"
                                 f"🏹 Skorpionlar: {dep.scorpions:,}\n"
@@ -822,17 +823,19 @@ async def process_deposits_job(bot: Bot):
                             pass
                 else:
                     # Kunlik foiz to'lash
-                    interest = await dep_repo.pay_daily_interest(dep)
+                    interest = await dep_repo.pay_daily_interest(dep,
+                                                                  s_price=s_price, d_price=d_price, sc_price=sc_price)
                     logger.info(f"Omonat #{dep_id} kunlik foiz: +{interest}")
                     if interest > 0:
                         house = await house_repo.get_by_id(dep.house_id)
                         if house and house.lord_id:
                             days_left = max(0, (dep.expires_at - now).days)
+                            mil_val = dep.soldiers * s_price + dep.dragons * d_price + dep.scorpions * sc_price
                             try:
                                 await bot.send_message(
                                     house.lord_id,
                                     f"🏦 <b>Omonat kunlik foizi keldi!</b>\n\n"
-                                    f"📊 Omonat: {dep.gold:,} tanga (umumiy)\n"
+                                    f"📊 Omonat: {dep.gold + mil_val:,} tanga (umumiy)\n"
                                     f"📈 +{interest:,} tanga xazinangizga tushdi\n"
                                     f"⏳ Omonat tugashiga: {days_left} kun",
                                     parse_mode="HTML"
