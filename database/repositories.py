@@ -1257,6 +1257,7 @@ class IronBankDepositRepo:
         """Omonatni yopish — resurslarni qaytarish + foiz to'lash"""
         from database.models import IronBankDeposit
         from datetime import datetime
+        from config.settings import settings as cfg
         import math
 
         deposit.is_active = False
@@ -1266,16 +1267,24 @@ class IronBankDepositRepo:
         days_held = (datetime.utcnow() - deposit.created_at).days
         days_held = min(days_held, deposit.duration_days)
 
-        # Foiz faqat oltinga (xazinaga)
+        # Foiz umumiy omonat summasidan (gold = oltin + harbiy ekvivalent)
         if pay_interest and days_held > 0:
             interest = math.floor(deposit.gold * deposit.interest_rate_per_day * days_held)
         else:
             interest = 0
 
-        # Resurslarni xonadonga qaytarish
+        # Asl oltin = umumiy gold - harbiy ekvivalent
+        mil_val = (
+            deposit.soldiers  * cfg.SOLDIER_PRICE +
+            deposit.dragons   * cfg.DRAGON_PRICE  +
+            deposit.scorpions * cfg.SCORPION_PRICE
+        )
+        pure_gold = max(0, deposit.gold - mil_val)
+
+        # Resurslarni xonadonga qaytarish (oltin + foiz + harbiy birliklar)
         await self.session.execute(
             update(House).where(House.id == deposit.house_id).values(
-                treasury=House.treasury + deposit.gold + interest,
+                treasury=House.treasury + pure_gold + interest,
                 total_soldiers=House.total_soldiers + deposit.soldiers,
                 total_dragons=House.total_dragons + deposit.dragons,
                 total_scorpions=House.total_scorpions + deposit.scorpions,
