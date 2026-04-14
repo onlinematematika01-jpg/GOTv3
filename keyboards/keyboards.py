@@ -81,6 +81,7 @@ def iron_bank_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="💰 Qarz Olish", callback_data="bank:loan")
     builder.button(text="💸 Qarz To'lash", callback_data="bank:repay")
     builder.button(text="📋 Qarz Holati", callback_data="bank:status")
+    builder.button(text="🏦 Omonat", callback_data="bank:deposit_menu")
     builder.adjust(2)
     return builder.as_markup()
 
@@ -151,6 +152,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="🧪 Maxsus Itemlar", callback_data="admin:custom_items")
     builder.button(text="🏆 Turnir boshqaruvi", callback_data="admin:tournament")
     builder.button(text="☠️ Lord O'ldirish", callback_data="admin:kill_lord")
+    builder.button(text="🏦 Omonat Sozlamalari", callback_data="admin:deposit_settings")
     builder.adjust(2)
     return builder.as_markup()
 
