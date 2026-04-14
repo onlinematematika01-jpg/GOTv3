@@ -567,6 +567,8 @@ class BotSettingsRepo:
         "interest_rate": "0.10",
         "bank_min_loan": "100",
         "bank_max_loan": "100000",
+        "deposit_rate_per_day": "0.02",
+        "deposit_duration_days": "7",
     }
 
     def __init__(self, session: AsyncSession):
@@ -1208,3 +1210,89 @@ class AllianceGroupRepo:
 
         ranking.sort(key=lambda x: x["power"], reverse=True)
         return ranking[:limit]
+
+
+class IronBankDepositRepo:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create(self, house_id: int, gold: int, soldiers: int, dragons: int,
+                     scorpions: int, rate_per_day: float, duration_days: int) -> "IronBankDeposit":
+        from database.models import IronBankDeposit
+        from datetime import datetime, timedelta
+        expires_at = datetime.utcnow() + timedelta(days=duration_days)
+        dep = IronBankDeposit(
+            house_id=house_id,
+            gold=gold,
+            soldiers=soldiers,
+            dragons=dragons,
+            scorpions=scorpions,
+            interest_rate_per_day=rate_per_day,
+            duration_days=duration_days,
+            expires_at=expires_at,
+        )
+        self.session.add(dep)
+        await self.session.commit()
+        await self.session.refresh(dep)
+        return dep
+
+    async def get_active(self, house_id: int) -> "Optional[IronBankDeposit]":
+        from database.models import IronBankDeposit
+        result = await self.session.execute(
+            select(IronBankDeposit).where(
+                IronBankDeposit.house_id == house_id,
+                IronBankDeposit.is_active == True,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_all_active(self) -> list:
+        from database.models import IronBankDeposit
+        result = await self.session.execute(
+            select(IronBankDeposit).where(IronBankDeposit.is_active == True)
+        )
+        return result.scalars().all()
+
+    async def close(self, deposit: "IronBankDeposit", pay_interest: bool = True):
+        """Omonatni yopish — resurslarni qaytarish + foiz to'lash"""
+        from database.models import IronBankDeposit
+        from datetime import datetime
+        import math
+
+        deposit.is_active = False
+        deposit.closed_at = datetime.utcnow()
+
+        # Kunlar sonini hisoblash (haqiqiy turgan vaqt, max muddat)
+        days_held = (datetime.utcnow() - deposit.created_at).days
+        days_held = min(days_held, deposit.duration_days)
+
+        # Foiz faqat oltinga (xazinaga)
+        if pay_interest and days_held > 0:
+            interest = math.floor(deposit.gold * deposit.interest_rate_per_day * days_held)
+        else:
+            interest = 0
+
+        # Resurslarni xonadonga qaytarish
+        await self.session.execute(
+            update(House).where(House.id == deposit.house_id).values(
+                treasury=House.treasury + deposit.gold + interest,
+                total_soldiers=House.total_soldiers + deposit.soldiers,
+                total_dragons=House.total_dragons + deposit.dragons,
+                total_scorpions=House.total_scorpions + deposit.scorpions,
+            )
+        )
+        await self.session.commit()
+        return interest
+
+    async def pay_daily_interest(self, deposit: "IronBankDeposit"):
+        """Kunlik foizni to'g'ridan-to'g'ri xazinaga o'tkazish"""
+        import math
+        interest = math.floor(deposit.gold * deposit.interest_rate_per_day)
+        if interest > 0:
+            await self.session.execute(
+                update(House).where(House.id == deposit.house_id).values(
+                    treasury=House.treasury + interest,
+                )
+            )
+            await self.session.commit()
+        return interest
