@@ -1253,38 +1253,40 @@ class IronBankDepositRepo:
         )
         return result.scalars().all()
 
-    async def close(self, deposit: "IronBankDeposit", pay_interest: bool = True):
+    async def close(self, deposit: "IronBankDeposit", pay_interest: bool = True,
+                    s_price: int = None, d_price: int = None, sc_price: int = None):
         """Omonatni yopish — resurslarni qaytarish + foiz to'lash"""
         from database.models import IronBankDeposit
         from datetime import datetime
         from config.settings import settings as cfg
         import math
 
+        sp  = s_price  if s_price  is not None else cfg.SOLDIER_PRICE
+        dp  = d_price  if d_price  is not None else cfg.DRAGON_PRICE
+        scp = sc_price if sc_price is not None else cfg.SCORPION_PRICE
+
         deposit.is_active = False
         deposit.closed_at = datetime.utcnow()
 
-        # Kunlar sonini hisoblash (haqiqiy turgan vaqt, max muddat)
         days_held = (datetime.utcnow() - deposit.created_at).days
         days_held = min(days_held, deposit.duration_days)
 
-        # Foiz umumiy omonat summasidan (gold = oltin + harbiy ekvivalent)
+        # Foiz umumiy omonat summasidan (oltin + harbiy ekvivalent bozor narxida)
+        mil_val = (
+            deposit.soldiers  * sp  +
+            deposit.dragons   * dp  +
+            deposit.scorpions * scp
+        )
+        total_val = deposit.gold + mil_val
         if pay_interest and days_held > 0:
-            interest = math.floor(deposit.gold * deposit.interest_rate_per_day * days_held)
+            interest = math.floor(total_val * deposit.interest_rate_per_day * days_held)
         else:
             interest = 0
-
-        # Asl oltin = umumiy gold - harbiy ekvivalent
-        mil_val = (
-            deposit.soldiers  * cfg.SOLDIER_PRICE +
-            deposit.dragons   * cfg.DRAGON_PRICE  +
-            deposit.scorpions * cfg.SCORPION_PRICE
-        )
-        pure_gold = max(0, deposit.gold - mil_val)
 
         # Resurslarni xonadonga qaytarish (oltin + foiz + harbiy birliklar)
         await self.session.execute(
             update(House).where(House.id == deposit.house_id).values(
-                treasury=House.treasury + pure_gold + interest,
+                treasury=House.treasury + deposit.gold + interest,
                 total_soldiers=House.total_soldiers + deposit.soldiers,
                 total_dragons=House.total_dragons + deposit.dragons,
                 total_scorpions=House.total_scorpions + deposit.scorpions,
@@ -1293,10 +1295,21 @@ class IronBankDepositRepo:
         await self.session.commit()
         return interest
 
-    async def pay_daily_interest(self, deposit: "IronBankDeposit"):
+    async def pay_daily_interest(self, deposit: "IronBankDeposit",
+                                  s_price: int = None, d_price: int = None, sc_price: int = None):
         """Kunlik foizni to'g'ridan-to'g'ri xazinaga o'tkazish"""
         import math
-        interest = math.floor(deposit.gold * deposit.interest_rate_per_day)
+        from config.settings import settings as cfg
+        sp  = s_price  if s_price  is not None else cfg.SOLDIER_PRICE
+        dp  = d_price  if d_price  is not None else cfg.DRAGON_PRICE
+        scp = sc_price if sc_price is not None else cfg.SCORPION_PRICE
+        mil_val = (
+            deposit.soldiers  * sp  +
+            deposit.dragons   * dp  +
+            deposit.scorpions * scp
+        )
+        total = deposit.gold + mil_val
+        interest = math.floor(total * deposit.interest_rate_per_day)
         if interest > 0:
             await self.session.execute(
                 update(House).where(House.id == deposit.house_id).values(
