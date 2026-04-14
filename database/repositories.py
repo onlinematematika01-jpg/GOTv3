@@ -569,6 +569,8 @@ class BotSettingsRepo:
         "bank_max_loan": "100000",
         "deposit_rate_per_day": "0.02",
         "deposit_duration_days": "7",
+        "deposit_job_hour": "1",
+        "deposit_job_minute": "0",
     }
 
     def __init__(self, session: AsyncSession):
