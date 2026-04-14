@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from database.engine import AsyncSessionFactory
 from database.repositories import UserRepo, HouseRepo, IronBankRepo, BotSettingsRepo, ChronicleRepo, IronBankDepositRepo
 from sqlalchemy import update
-from database.models import IronBankLoan
+from database.models import IronBankLoan, House
 from keyboards import iron_bank_keyboard, back_only_keyboard
 from config.settings import settings
 from utils.chronicle import post_to_chronicle, format_chronicle
