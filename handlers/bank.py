@@ -443,6 +443,17 @@ async def deposit_menu(callback: CallbackQuery):
 async def deposit_start(callback: CallbackQuery, state: FSMContext):
     from database.models import RoleEnum
     from database.repositories import IronBankDepositRepo
+    from handlers.war import is_war_time_async
+
+    # Urush seansi vaqtida omonat ochish taqiqlangan
+    if await is_war_time_async():
+        await callback.answer(
+            "⚔️ Urush seansi davomida omonat ochib bo'lmaydi!\n"
+            "Urush tugagandan so'ng urinib ko'ring.",
+            show_alert=True
+        )
+        return
+
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
         house_repo = HouseRepo(session)
