@@ -334,10 +334,19 @@ async def bank_status(callback: CallbackQuery):
 #  OMONAT TIZIMI
 # ═══════════════════════════════════════════════════════
 
+# Harbiy narxlar (settings dan)
+def _military_value(soldiers: int, dragons: int, scorpions: int) -> int:
+    return (
+        soldiers  * settings.SOLDIER_PRICE +
+        dragons   * settings.DRAGON_PRICE  +
+        scorpions * settings.SCORPION_PRICE
+    )
+
+
 class DepositState(StatesGroup):
-    waiting_gold     = State()
-    waiting_soldiers = State()
-    waiting_dragons  = State()
+    waiting_gold      = State()
+    waiting_soldiers  = State()
+    waiting_dragons   = State()
     waiting_scorpions = State()
 
 
@@ -345,8 +354,8 @@ async def _get_deposit_settings() -> dict:
     async with AsyncSessionFactory() as session:
         repo = BotSettingsRepo(session)
         return {
-            "rate_per_day": await repo.get_float("deposit_rate_per_day"),   # kunlik foiz
-            "duration_days": await repo.get_int("deposit_duration_days"),   # muddat (kun)
+            "rate_per_day":  await repo.get_float("deposit_rate_per_day"),
+            "duration_days": await repo.get_int("deposit_duration_days"),
         }
 
 
@@ -374,16 +383,18 @@ async def deposit_menu(callback: CallbackQuery):
         from datetime import datetime, timezone
         expires_tz = deposit.expires_at.replace(tzinfo=timezone.utc) + TASHKENT
         days_left = max(0, (deposit.expires_at - datetime.utcnow()).days)
+        mil_val = _military_value(deposit.soldiers, deposit.dragons, deposit.scorpions)
         text = (
             "🏦 <b>TEMIR BANK — OMONAT</b>\n\n"
             "📦 <b>Faol omonat:</b>\n"
             f"💰 Oltin: {deposit.gold:,} tanga\n"
-            f"🗡️ Askarlar: {deposit.soldiers:,}\n"
-            f"🐉 Ajdarlar: {deposit.dragons:,}\n"
-            f"🏹 Skorpionlar: {deposit.scorpions:,}\n\n"
+            f"🗡️ Askarlar: {deposit.soldiers:,} ({deposit.soldiers * settings.SOLDIER_PRICE:,} tanga)\n"
+            f"🐉 Ajdarlar: {deposit.dragons:,} ({deposit.dragons * settings.DRAGON_PRICE:,} tanga)\n"
+            f"🏹 Skorpionlar: {deposit.scorpions:,} ({deposit.scorpions * settings.SCORPION_PRICE:,} tanga)\n"
+            f"📊 Umumiy omonat: <b>{deposit.gold + mil_val:,} tanga</b>\n\n"
             f"📅 Muddat tugashi: {expires_tz.strftime('%Y-%m-%d')} (Toshkent)\n"
             f"⏳ Qolgan kun: {days_left}\n\n"
-            f"📈 Kunlik foiz: {rate_pct:.1f}%\n"
+            f"📈 Kunlik foiz: {rate_pct:.1f}% (umumiy summadan)\n"
             "🛡️ Omonat urushdan himoyalangan!"
         )
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -438,9 +449,13 @@ async def deposit_start(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await callback.message.answer(
         f"📥 <b>Omonat ochish</b>\n\n"
-        f"📈 Kunlik foiz: {cfg['rate_per_day']*100:.1f}%  |  📅 Muddat: {cfg['duration_days']} kun\n\n"
+        f"📈 Kunlik foiz: <b>{cfg['rate_per_day']*100:.1f}%</b>  |  📅 Muddat: <b>{cfg['duration_days']} kun</b>\n\n"
+        f"💡 Foiz umumiy omonat summasidan hisoblanadi:\n"
+        f"  🗡️ 1 askar = {settings.SOLDIER_PRICE} tanga\n"
+        f"  🐉 1 ajdar = {settings.DRAGON_PRICE} tanga\n"
+        f"  🏹 1 skorpion = {settings.SCORPION_PRICE} tanga\n\n"
         f"💰 Xazinadan omonatga qo'ymoqchi bo'lgan <b>oltin miqdorini</b> kiriting:\n"
-        f"(0 kiriting — oltin qo'ymaslik)\n\n"
+        f"(0 — oltin qo'ymaslik)\n\n"
         f"Bekor qilish: /cancel",
         parse_mode="HTML"
     )
@@ -607,25 +622,34 @@ async def deposit_scorpions(message: Message, state: FSMContext):
             await house_repo.update_military(house.id, scorpions=-amount)
 
         cfg = await _get_deposit_settings()
+        gold_in = data.get("gold", 0)
+        soldiers_in = data.get("soldiers", 0)
+        dragons_in = data.get("dragons", 0)
+        scorpions_in = amount
+        # Umumiy oltin ekvivalenti (foiz shu summadan hisoblanadi)
+        total_gold = gold_in + _military_value(soldiers_in, dragons_in, scorpions_in)
         dep = await dep_repo.create(
             house_id=data["house_id"],
-            gold=data.get("gold", 0),
-            soldiers=data.get("soldiers", 0),
-            dragons=data.get("dragons", 0),
-            scorpions=amount,
+            gold=total_gold,
+            soldiers=soldiers_in,
+            dragons=dragons_in,
+            scorpions=scorpions_in,
             rate_per_day=cfg["rate_per_day"],
             duration_days=cfg["duration_days"],
         )
 
     from datetime import datetime, timezone
     expires_tz = dep.expires_at.replace(tzinfo=timezone.utc) + TASHKENT
+    mil_val = _military_value(dep.soldiers, dep.dragons, dep.scorpions)
+    pure_gold = dep.gold - mil_val
     await state.clear()
     await message.answer(
         f"✅ <b>Omonat muvaffaqiyatli ochildi!</b>\n\n"
-        f"💰 Oltin: {dep.gold:,} tanga\n"
-        f"🗡️ Askarlar: {dep.soldiers:,}\n"
-        f"🐉 Ajdarlar: {dep.dragons:,}\n"
-        f"🏹 Skorpionlar: {dep.scorpions:,}\n\n"
+        f"💰 Oltin: {pure_gold:,} tanga\n"
+        f"🗡️ Askarlar: {dep.soldiers:,} ({dep.soldiers * settings.SOLDIER_PRICE:,} tanga)\n"
+        f"🐉 Ajdarlar: {dep.dragons:,} ({dep.dragons * settings.DRAGON_PRICE:,} tanga)\n"
+        f"🏹 Skorpionlar: {dep.scorpions:,} ({dep.scorpions * settings.SCORPION_PRICE:,} tanga)\n"
+        f"📊 Umumiy omonat: <b>{dep.gold:,} tanga</b>\n\n"
         f"📈 Kunlik foiz: {dep.interest_rate_per_day*100:.1f}%\n"
         f"📅 Muddat: {dep.duration_days} kun\n"
         f"🗓️ Tugash sanasi: {expires_tz.strftime('%Y-%m-%d')}\n\n"
@@ -651,10 +675,12 @@ async def deposit_close(callback: CallbackQuery):
             return
         interest = await dep_repo.close(deposit, pay_interest=True)
 
+    mil_val = _military_value(deposit.soldiers, deposit.dragons, deposit.scorpions)
+    pure_gold = deposit.gold - mil_val
     await callback.answer()
     await callback.message.edit_text(
         f"📤 <b>Omonat yopildi!</b>\n\n"
-        f"💰 Oltin qaytarildi: {deposit.gold:,} tanga\n"
+        f"💰 Oltin qaytarildi: {pure_gold:,} tanga\n"
         f"🗡️ Askarlar qaytarildi: {deposit.soldiers:,}\n"
         f"🐉 Ajdarlar qaytarildi: {deposit.dragons:,}\n"
         f"🏹 Skorpionlar qaytarildi: {deposit.scorpions:,}\n"
