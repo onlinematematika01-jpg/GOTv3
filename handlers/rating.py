@@ -64,6 +64,44 @@ async def _get_alliances_data(session) -> list:
     return await AllianceGroupRepo(session).get_alliance_power_ranking(limit=1000)
 
 
+async def _get_deposit_data(session) -> list:
+    """Faol omonatlarni umumiy summasi bo'yicha tartiblaydi"""
+    from database.repositories import IronBankDepositRepo, MarketRepo
+    dep_repo = IronBankDepositRepo(session)
+    market_repo = MarketRepo(session)
+    prices = await market_repo.get_all_prices()
+    from config.settings import settings as cfg
+    s_price  = prices.get("soldier",  cfg.SOLDIER_PRICE)
+    d_price  = prices.get("dragon",   cfg.DRAGON_PRICE)
+    sc_price = prices.get("scorpion", cfg.SCORPION_PRICE)
+
+    deposits = await dep_repo.get_all_active()
+    # House nomini olish uchun
+    from database.repositories import HouseRepo
+    house_repo = HouseRepo(session)
+    result = []
+    for dep in deposits:
+        house = await house_repo.get_by_id(dep.house_id)
+        if not house:
+            continue
+        mil_val = dep.soldiers * s_price + dep.dragons * d_price + dep.scorpions * sc_price
+        total = dep.gold + mil_val
+        result.append({
+            "house_name": house.name,
+            "gold": dep.gold,
+            "soldiers": dep.soldiers,
+            "dragons": dep.dragons,
+            "scorpions": dep.scorpions,
+            "mil_val": mil_val,
+            "total": total,
+            "s_price": s_price,
+            "d_price": d_price,
+            "sc_price": sc_price,
+        })
+    result.sort(key=lambda x: x["total"], reverse=True)
+    return result
+
+
 def _build_power_page(data: list, page: int) -> str:
     start = page * PAGE_SIZE
     lines = ["⚡ <b>UMUMIY KUCH REYTINGI</b>\n"]
@@ -133,6 +171,26 @@ def _build_alliances_page(data: list, page: int) -> str:
     return "\n".join(lines)
 
 
+def _build_deposit_page(data: list, page: int) -> str:
+    start = page * PAGE_SIZE
+    lines = ["🏦 <b>OMONAT REYTINGI</b>\n"]
+    if not data:
+        lines.append("Hozircha hech kim omonat ochmagan.")
+        return "\n".join(lines)
+    for i, d in enumerate(data[start: start + PAGE_SIZE]):
+        mil_parts = []
+        if d["soldiers"]: mil_parts.append(f"🗡️{d['soldiers']:,}×{d['s_price']}")
+        if d["dragons"]:  mil_parts.append(f"🐉{d['dragons']}×{d['d_price']}")
+        if d["scorpions"]:mil_parts.append(f"🏹{d['scorpions']}×{d['sc_price']}")
+        mil_line = "  |  " + "  ".join(mil_parts) if mil_parts else ""
+        lines.append(
+            f"{get_medal(start + i)} <b>{d['house_name']}</b>\n"
+            f"   📊 {d['total']:,} tanga  |  💰 {d['gold']:,}"
+            + mil_line
+        )
+    return "\n".join(lines)
+
+
 RATING_HANDLERS = {
     "power":     (_get_power_data,     _build_power_page),
     "soldiers":  (_get_soldiers_data,  _build_soldiers_page),
@@ -140,6 +198,7 @@ RATING_HANDLERS = {
     "dragons":   (_get_dragons_data,   _build_dragons_page),
     "wins":      (_get_wins_data,      _build_wins_page),
     "alliances": (_get_alliances_data, _build_alliances_page),
+    "deposit":   (_get_deposit_data,   _build_deposit_page),
 }
 
 
@@ -210,6 +269,10 @@ async def rating_wins(callback: CallbackQuery):
 @router.callback_query(F.data == "rating:alliances")
 async def rating_alliances(callback: CallbackQuery):
     await _show_rating(callback, "alliances", 0)
+
+@router.callback_query(F.data == "rating:deposit")
+async def rating_deposit(callback: CallbackQuery):
+    await _show_rating(callback, "deposit", 0)
 
 
 @router.callback_query(F.data.startswith("rating_page:"))
