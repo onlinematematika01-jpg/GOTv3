@@ -10,6 +10,7 @@ from database.models import RoleEnum, RegionEnum, House
 from keyboards import admin_keyboard, back_only_keyboard
 from config.settings import settings
 from sqlalchemy import select, update, delete, text
+from sqlalchemy.orm import selectinload
 from database.models import User, MarketPrice, IronBankLoan, Alliance, War, Chronicle, InternalMessage, WarAllySupport, HukmdorClaim, HukmdorClaimResponse, UserCustomItem, HouseCustomItem
 
 router = Router()
@@ -1998,7 +1999,7 @@ async def admin_kill_lord_menu(callback: CallbackQuery):
             select(User).where(
                 User.role == RoleEnum.LORD,
                 User.is_active == True
-            )
+            ).options(selectinload(User.house))
         )
         lords = result.scalars().all()
 
@@ -2009,7 +2010,7 @@ async def admin_kill_lord_menu(callback: CallbackQuery):
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     buttons = [
         [InlineKeyboardButton(
-            text=f"☠️ {lord.full_name}",
+            text=f"☠️ {lord.full_name} ({lord.house.name if lord.house else 'xonadonsiz'})",
             callback_data=f"admin:kill_lord_confirm:{lord.id}"
         )]
         for lord in lords
