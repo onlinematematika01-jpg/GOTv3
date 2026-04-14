@@ -2100,3 +2100,96 @@ async def admin_kill_lord_execute(callback: CallbackQuery):
         parse_mode="HTML"
     )
     await callback.answer()
+
+
+# ─── Admin: Omonat Sozlamalari ─────────────────────────────────────────────────
+class DepositAdminState(StatesGroup):
+    waiting_rate = State()
+    waiting_duration = State()
+
+
+@router.callback_query(F.data == "admin:deposit_settings")
+async def admin_deposit_settings(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        rate = await cfg.get_float("deposit_rate_per_day")
+        duration = await cfg.get_int("deposit_duration_days")
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📈 Kunlik foizni o'zgartirish", callback_data="admin:deposit_set_rate")],
+        [InlineKeyboardButton(text="📅 Muddatni o'zgartirish", callback_data="admin:deposit_set_duration")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:back")],
+    ])
+    await callback.answer()
+    await callback.message.edit_text(
+        f"🏦 <b>Omonat Sozlamalari</b>\n\n"
+        f"📈 Kunlik foiz: <b>{rate*100:.2f}%</b>\n"
+        f"📅 Muddat: <b>{duration} kun</b>\n"
+        f"💹 Jami foiz: <b>{rate*100*duration:.1f}%</b>",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "admin:deposit_set_rate")
+async def admin_deposit_set_rate_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await state.set_state(DepositAdminState.waiting_rate)
+    await callback.answer()
+    await callback.message.answer(
+        "📈 Yangi <b>kunlik foiz</b> kiriting (masalan: 2 → 2% kunlik):",
+        parse_mode="HTML"
+    )
+
+
+@router.message(DepositAdminState.waiting_rate)
+async def admin_deposit_set_rate(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        val = float(message.text.strip().replace(",", "."))
+        if val < 0 or val > 100:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ 0 dan 100 gacha raqam kiriting:")
+        return
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        await cfg.set("deposit_rate_per_day", str(val / 100))
+    await state.clear()
+    await message.answer(f"✅ Kunlik foiz: <b>{val:.2f}%</b> qilib belgilandi.", parse_mode="HTML")
+
+
+@router.callback_query(F.data == "admin:deposit_set_duration")
+async def admin_deposit_set_duration_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await state.set_state(DepositAdminState.waiting_duration)
+    await callback.answer()
+    await callback.message.answer(
+        "📅 Omonat muddatini <b>kun</b> bilan kiriting (masalan: 7):",
+        parse_mode="HTML"
+    )
+
+
+@router.message(DepositAdminState.waiting_duration)
+async def admin_deposit_set_duration(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        val = int(message.text.strip())
+        if val < 1:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Kamida 1 kun kiriting:")
+        return
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        await cfg.set("deposit_duration_days", str(val))
+    await state.clear()
+    await message.answer(f"✅ Omonat muddati: <b>{val} kun</b> qilib belgilandi.", parse_mode="HTML")
