@@ -2106,6 +2106,7 @@ async def admin_kill_lord_execute(callback: CallbackQuery):
 class DepositAdminState(StatesGroup):
     waiting_rate = State()
     waiting_duration = State()
+    waiting_time = State()
 
 
 @router.callback_query(F.data == "admin:deposit_settings")
@@ -2117,11 +2118,14 @@ async def admin_deposit_settings(callback: CallbackQuery):
         cfg = BotSettingsRepo(session)
         rate = await cfg.get_float("deposit_rate_per_day")
         duration = await cfg.get_int("deposit_duration_days")
+        dep_hour = await cfg.get_int("deposit_job_hour")
+        dep_minute = await cfg.get_int("deposit_job_minute")
 
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📈 Kunlik foizni o'zgartirish", callback_data="admin:deposit_set_rate")],
         [InlineKeyboardButton(text="📅 Muddatni o'zgartirish", callback_data="admin:deposit_set_duration")],
+        [InlineKeyboardButton(text="🕐 Foiz tushadigan vaqtni o'zgartirish", callback_data="admin:deposit_set_time")],
         [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:back")],
     ])
     await callback.answer()
@@ -2129,7 +2133,8 @@ async def admin_deposit_settings(callback: CallbackQuery):
         f"🏦 <b>Omonat Sozlamalari</b>\n\n"
         f"📈 Kunlik foiz: <b>{rate*100:.2f}%</b>\n"
         f"📅 Muddat: <b>{duration} kun</b>\n"
-        f"💹 Jami foiz: <b>{rate*100*duration:.1f}%</b>",
+        f"💹 Jami foiz: <b>{rate*100*duration:.1f}%</b>\n"
+        f"🕐 Foiz tushadigan vaqt: <b>{dep_hour:02d}:{dep_minute:02d}</b> (Toshkent)",
         reply_markup=kb,
         parse_mode="HTML"
     )
@@ -2193,3 +2198,51 @@ async def admin_deposit_set_duration(message: Message, state: FSMContext):
         await cfg.set("deposit_duration_days", str(val))
     await state.clear()
     await message.answer(f"✅ Omonat muddati: <b>{val} kun</b> qilib belgilandi.", parse_mode="HTML")
+
+
+@router.callback_query(F.data == "admin:deposit_set_time")
+async def admin_deposit_set_time_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await state.set_state(DepositAdminState.waiting_time)
+    await callback.answer()
+    await callback.message.answer(
+        "🕐 Foiz tushadigan <b>vaqtni</b> kiriting.\n\n"
+        "Format: <code>HH:MM</code> (24 soatlik, Toshkent vaqti)\n"
+        "Masalan: <code>01:00</code> yoki <code>08:30</code>",
+        parse_mode="HTML"
+    )
+
+
+@router.message(DepositAdminState.waiting_time)
+async def admin_deposit_set_time(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    text = message.text.strip()
+    try:
+        parts = text.split(":")
+        if len(parts) != 2:
+            raise ValueError
+        hour = int(parts[0])
+        minute = int(parts[1])
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Noto'g'ri format. HH:MM shaklida kiriting (masalan: 01:00):")
+        return
+
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        await cfg.set("deposit_job_hour", str(hour))
+        await cfg.set("deposit_job_minute", str(minute))
+
+    await state.clear()
+
+    from utils.scheduler import reload_deposit_job
+    await reload_deposit_job(hour, minute)
+
+    await message.answer(
+        f"✅ Foiz tushadigan vaqt: <b>{hour:02d}:{minute:02d}</b> (Toshkent) qilib belgilandi.\n"
+        f"Scheduler qayta yuklandi!",
+        parse_mode="HTML"
+    )
