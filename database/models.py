@@ -425,5 +425,8 @@ class IronBankDeposit(Base):
     created_at = Column(DateTime, server_default=func.now())
     expires_at = Column(DateTime, nullable=False)
     closed_at = Column(DateTime, nullable=True)
+    # Urush natijasi: mag'lub omonatining foizi g'olibga tushadi
+    war_winner_house_id = Column(Integer, ForeignKey("houses.id"), nullable=True)
 
     house = relationship("House", foreign_keys=[house_id])
+    war_winner = relationship("House", foreign_keys=[war_winner_house_id])
