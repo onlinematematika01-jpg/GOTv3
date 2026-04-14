@@ -404,3 +404,26 @@ class TournamentAnswer(Base):
     answered_at   = Column(DateTime, server_default=func.now())
 
     question = relationship("TournamentQuestion", back_populates="answers")
+
+
+class IronBankDeposit(Base):
+    """Temir Bank omonat tizimi"""
+    __tablename__ = "iron_bank_deposits"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
+    # Omonatga qo'yilgan resurslar
+    gold = Column(BigInteger, default=0)
+    soldiers = Column(Integer, default=0)
+    dragons = Column(Integer, default=0)
+    scorpions = Column(Integer, default=0)
+    # Foiz va muddat
+    interest_rate_per_day = Column(Float, nullable=False)   # kunlik foiz (masalan 0.02 = 2%)
+    duration_days = Column(Integer, nullable=False)          # omonat muddati (kun)
+    # Holat
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    expires_at = Column(DateTime, nullable=False)
+    closed_at = Column(DateTime, nullable=True)
+
+    house = relationship("House", foreign_keys=[house_id])
