@@ -466,6 +466,68 @@ async def _run_war(war, bot, session):
         except Exception:
             pass
 
+    # Mag'lubning omonat foizining yarmi g'olibga o'tkaziladi
+    from database.repositories import IronBankDepositRepo
+    dep_repo = IronBankDepositRepo(session)
+    loser_deposit = await dep_repo.get_active(loser.id)
+    if loser_deposit:
+        from database.repositories import MarketRepo
+        import math
+        market_repo = MarketRepo(session)
+        prices = await market_repo.get_all_prices()
+        from config.settings import settings as cfg
+        sp  = prices.get("soldier",  cfg.SOLDIER_PRICE)
+        dp  = prices.get("dragon",   cfg.DRAGON_PRICE)
+        scp = prices.get("scorpion", cfg.SCORPION_PRICE)
+
+        mil_val = (
+            loser_deposit.soldiers  * sp  +
+            loser_deposit.dragons   * dp  +
+            loser_deposit.scorpions * scp
+        )
+        total_deposit = loser_deposit.gold + mil_val
+
+        # Bir kunlik foiz * 0.5 — g'olibga o'tadi
+        daily_interest = math.floor(total_deposit * loser_deposit.interest_rate_per_day)
+        looted_interest = math.floor(daily_interest * 0.5)
+
+        if looted_interest > 0:
+            await house_repo.update_treasury(winner.id, looted_interest)
+            await house_repo.update_treasury(loser.id, -looted_interest)
+
+            deposit_loot_text_winner = (
+                f"🏦 <b>Omonat foizi o'ljasi!</b>\n\n"
+                f"⚔️ <b>{loser.name}</b> ustidan qozongan g'alabangiz uchun\n"
+                f"ularning omonatidagi kunlik foizning yarmi sizga o'tkazildi.\n\n"
+                f"📊 Ularning omonati: <b>{total_deposit:,} tanga</b>\n"
+                f"📈 Kunlik foiz: <b>{daily_interest:,} tanga</b>\n"
+                f"💰 Sizga o'tkazildi: <b>+{looted_interest:,} tanga</b>"
+            )
+            deposit_loot_text_loser = (
+                f"🏦 <b>Omonat foizingiz o'ljaga ketdi!</b>\n\n"
+                f"⚔️ <b>{winner.name}</b> ga mag'lubiyat sababli\n"
+                f"omonatingizdagi kunlik foizning yarmi ularga o'tdi.\n\n"
+                f"📊 Omonatingiz: <b>{total_deposit:,} tanga</b>\n"
+                f"📈 Kunlik foiz: <b>{daily_interest:,} tanga</b>\n"
+                f"💸 Olib ketildi: <b>-{looted_interest:,} tanga</b>"
+            )
+
+            # G'olibga xabar
+            winner_lord_id = winner.lord_id
+            if winner_lord_id:
+                try:
+                    await bot.send_message(winner_lord_id, deposit_loot_text_winner, parse_mode="HTML")
+                except Exception:
+                    pass
+
+            # Mag'lubga xabar
+            loser_lord_id = loser.lord_id
+            if loser_lord_id:
+                try:
+                    await bot.send_message(loser_lord_id, deposit_loot_text_loser, parse_mode="HTML")
+                except Exception:
+                    pass
+
 
 async def check_grace_period_job(bot: Bot):
     """Grace Period tugagan urushlarni darhol hisoblash va natijalarni e'lon qilish"""
