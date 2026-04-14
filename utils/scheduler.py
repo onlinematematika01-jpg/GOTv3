@@ -761,73 +761,85 @@ async def check_claim_timeouts_job(bot: Bot):
 async def process_deposits_job(bot: Bot):
     """Kunlik foiz to'lash + muddat tugagan omonatlarni avtomatik yopish"""
     from database.repositories import IronBankDepositRepo
-    from datetime import datetime
+    from database.models import IronBankDeposit
+    from config.settings import settings as cfg
 
     logger.info("Omonat tekshiruvi boshlandi...")
-    async with AsyncSessionFactory() as session:
-        dep_repo = IronBankDepositRepo(session)
-        deposits = await dep_repo.get_all_active()
 
-    for dep in deposits:
+    # Barcha faol omonat ID larini olish
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(
+            select(IronBankDeposit).where(IronBankDeposit.is_active == True)
+        )
+        dep_ids = [d.id for d in result.scalars().all()]
+
+    logger.info(f"Faol omonatlar: {len(dep_ids)} ta")
+
+    for dep_id in dep_ids:
         try:
             async with AsyncSessionFactory() as session:
-                dep_repo = IronBankDepositRepo(session)
-                # Faol omonatni qayta olish (session fresh bo'lishi uchun)
-                from database.models import IronBankDeposit
                 result = await session.execute(
                     select(IronBankDeposit).where(
-                        IronBankDeposit.id == dep.id,
+                        IronBankDeposit.id == dep_id,
                         IronBankDeposit.is_active == True
                     )
                 )
-                fresh_dep = result.scalar_one_or_none()
-                if not fresh_dep:
+                dep = result.scalar_one_or_none()
+                if not dep:
                     continue
 
+                dep_repo = IronBankDepositRepo(session)
+                house_repo = HouseRepo(session)
                 now = datetime.utcnow()
 
-                if now >= fresh_dep.expires_at:
-                    # Muddat tugadi — yopish + to'liq foiz
-                    interest = await dep_repo.close(fresh_dep, pay_interest=True)
-                    logger.info(f"Omonat #{fresh_dep.id} yopildi. Foiz: {interest}")
-                    # Xonadonga xabar
-                    try:
-                        house_repo = HouseRepo(session)
-                        house = await house_repo.get_by_id(fresh_dep.house_id)
-                        if house and house.lord_id:
+                # Harbiy ekvivalent va asl oltin
+                mil_val = (
+                    dep.soldiers  * cfg.SOLDIER_PRICE +
+                    dep.dragons   * cfg.DRAGON_PRICE  +
+                    dep.scorpions * cfg.SCORPION_PRICE
+                )
+                pure_gold = max(0, dep.gold - mil_val)
+
+                if now >= dep.expires_at:
+                    # Muddat tugadi — yopish
+                    interest = await dep_repo.close(dep, pay_interest=True)
+                    logger.info(f"Omonat #{dep_id} yopildi. Foiz: {interest}")
+                    house = await house_repo.get_by_id(dep.house_id)
+                    if house and house.lord_id:
+                        try:
                             await bot.send_message(
                                 house.lord_id,
                                 f"🏦 <b>Omonat muddati tugadi!</b>\n\n"
-                                f"💰 Oltin qaytarildi: {fresh_dep.gold:,} tanga\n"
-                                f"🗡️ Askarlar: {fresh_dep.soldiers:,}\n"
-                                f"🐉 Ajdarlar: {fresh_dep.dragons:,}\n"
-                                f"🏹 Skorpionlar: {fresh_dep.scorpions:,}\n"
+                                f"💰 Oltin qaytarildi: {pure_gold:,} tanga\n"
+                                f"🗡️ Askarlar: {dep.soldiers:,}\n"
+                                f"🐉 Ajdarlar: {dep.dragons:,}\n"
+                                f"🏹 Skorpionlar: {dep.scorpions:,}\n"
                                 f"📈 Foiz daromadi: +{interest:,} tanga\n\n"
                                 f"✅ Barcha resurslar xazinangizga qaytarildi!",
                                 parse_mode="HTML"
                             )
-                    except Exception:
-                        pass
+                        except Exception:
+                            pass
                 else:
-                    # Muddat tugamagan — kunlik foiz to'lash
-                    interest = await dep_repo.pay_daily_interest(fresh_dep)
-                    logger.info(f"Omonat #{fresh_dep.id} kunlik foiz: +{interest}")
+                    # Kunlik foiz to'lash
+                    interest = await dep_repo.pay_daily_interest(dep)
+                    logger.info(f"Omonat #{dep_id} kunlik foiz: +{interest}")
                     if interest > 0:
-                        try:
-                            house_repo = HouseRepo(session)
-                            house = await house_repo.get_by_id(fresh_dep.house_id)
-                            if house and house.lord_id:
-                                days_left = max(0, (fresh_dep.expires_at - now).days)
+                        house = await house_repo.get_by_id(dep.house_id)
+                        if house and house.lord_id:
+                            days_left = max(0, (dep.expires_at - now).days)
+                            try:
                                 await bot.send_message(
                                     house.lord_id,
                                     f"🏦 <b>Omonat kunlik foizi keldi!</b>\n\n"
+                                    f"📊 Omonat: {dep.gold:,} tanga (umumiy)\n"
                                     f"📈 +{interest:,} tanga xazinangizga tushdi\n"
                                     f"⏳ Omonat tugashiga: {days_left} kun",
                                     parse_mode="HTML"
                                 )
-                        except Exception:
-                            pass
+                            except Exception:
+                                pass
         except Exception as e:
-            logger.error(f"Omonat #{dep.id} tekshiruvida xato: {e}")
+            logger.error(f"Omonat #{dep_id} tekshiruvida xato: {e}")
 
     logger.info("Omonat tekshiruvi yakunlandi.")
