@@ -466,67 +466,40 @@ async def _run_war(war, bot, session):
         except Exception:
             pass
 
-    # Mag'lubning omonat foizining yarmi g'olibga o'tkaziladi
+    # Mag'lubning faol omonatiga g'olib flag qo'yish (har kungi foiz bo'linadi)
     from database.repositories import IronBankDepositRepo
     dep_repo = IronBankDepositRepo(session)
     loser_deposit = await dep_repo.get_active(loser.id)
     if loser_deposit:
-        from database.repositories import MarketRepo
-        import math
-        market_repo = MarketRepo(session)
-        prices = await market_repo.get_all_prices()
-        from config.settings import settings as cfg
-        sp  = prices.get("soldier",  cfg.SOLDIER_PRICE)
-        dp  = prices.get("dragon",   cfg.DRAGON_PRICE)
-        scp = prices.get("scorpion", cfg.SCORPION_PRICE)
+        await dep_repo.set_war_winner(loser_deposit.id, winner.id)
 
-        mil_val = (
-            loser_deposit.soldiers  * sp  +
-            loser_deposit.dragons   * dp  +
-            loser_deposit.scorpions * scp
+        loser_lord_id = loser.lord_id
+        winner_lord_id = winner.lord_id
+
+        deposit_notice_loser = (
+            f"🏦 <b>Omonat foizingiz bo'linadi!</b>\n\n"
+            f"⚔️ <b>{winner.name}</b> ga mag'lubiyat sababli\n"
+            f"omonatingizdagi <b>har kunlik foizning yarmi</b> ularga o'tib turadi.\n"
+            f"Bu omonat muddati tugagunga qadar davom etadi.\n\n"
+            f"💡 Yangi omonat ochsangiz bu qoida ta'sir qilmaydi."
         )
-        total_deposit = loser_deposit.gold + mil_val
+        deposit_notice_winner = (
+            f"🏦 <b>Omonat foizi bonusi!</b>\n\n"
+            f"⚔️ <b>{loser.name}</b> ustidan qozongan g'alabangiz uchun\n"
+            f"ularning omonatidagi <b>har kunlik foizning yarmi</b> sizga tushib turadi.\n"
+            f"Bu ularning joriy omonati muddati tugagunga qadar davom etadi."
+        )
 
-        # Bir kunlik foiz * 0.5 — g'olibga o'tadi
-        daily_interest = math.floor(total_deposit * loser_deposit.interest_rate_per_day)
-        looted_interest = math.floor(daily_interest * 0.5)
-
-        if looted_interest > 0:
-            await house_repo.update_treasury(winner.id, looted_interest)
-            await house_repo.update_treasury(loser.id, -looted_interest)
-
-            deposit_loot_text_winner = (
-                f"🏦 <b>Omonat foizi o'ljasi!</b>\n\n"
-                f"⚔️ <b>{loser.name}</b> ustidan qozongan g'alabangiz uchun\n"
-                f"ularning omonatidagi kunlik foizning yarmi sizga o'tkazildi.\n\n"
-                f"📊 Ularning omonati: <b>{total_deposit:,} tanga</b>\n"
-                f"📈 Kunlik foiz: <b>{daily_interest:,} tanga</b>\n"
-                f"💰 Sizga o'tkazildi: <b>+{looted_interest:,} tanga</b>"
-            )
-            deposit_loot_text_loser = (
-                f"🏦 <b>Omonat foizingiz o'ljaga ketdi!</b>\n\n"
-                f"⚔️ <b>{winner.name}</b> ga mag'lubiyat sababli\n"
-                f"omonatingizdagi kunlik foizning yarmi ularga o'tdi.\n\n"
-                f"📊 Omonatingiz: <b>{total_deposit:,} tanga</b>\n"
-                f"📈 Kunlik foiz: <b>{daily_interest:,} tanga</b>\n"
-                f"💸 Olib ketildi: <b>-{looted_interest:,} tanga</b>"
-            )
-
-            # G'olibga xabar
-            winner_lord_id = winner.lord_id
-            if winner_lord_id:
-                try:
-                    await bot.send_message(winner_lord_id, deposit_loot_text_winner, parse_mode="HTML")
-                except Exception:
-                    pass
-
-            # Mag'lubga xabar
-            loser_lord_id = loser.lord_id
-            if loser_lord_id:
-                try:
-                    await bot.send_message(loser_lord_id, deposit_loot_text_loser, parse_mode="HTML")
-                except Exception:
-                    pass
+        if loser_lord_id:
+            try:
+                await bot.send_message(loser_lord_id, deposit_notice_loser, parse_mode="HTML")
+            except Exception:
+                pass
+        if winner_lord_id:
+            try:
+                await bot.send_message(winner_lord_id, deposit_notice_winner, parse_mode="HTML")
+            except Exception:
+                pass
 
 
 async def check_grace_period_job(bot: Bot):
@@ -911,25 +884,48 @@ async def process_deposits_job(bot: Bot):
                             pass
                 else:
                     # Kunlik foiz to'lash
-                    interest = await dep_repo.pay_daily_interest(dep,
-                                                                  s_price=s_price, d_price=d_price, sc_price=sc_price)
-                    logger.info(f"Omonat #{dep_id} kunlik foiz: +{interest}")
+                    interest, winner_share = await dep_repo.pay_daily_interest(dep,
+                                                                               s_price=s_price, d_price=d_price, sc_price=sc_price)
+                    logger.info(f"Omonat #{dep_id} kunlik foiz: +{interest} (g'olib ulushi: {winner_share})")
                     if interest > 0:
                         house = await house_repo.get_by_id(dep.house_id)
+                        days_left = max(0, (dep.expires_at - now).days)
+                        mil_val = dep.soldiers * s_price + dep.dragons * d_price + dep.scorpions * sc_price
+                        loser_share = interest - winner_share
+
+                        # Mag'lubga xabar
                         if house and house.lord_id:
-                            days_left = max(0, (dep.expires_at - now).days)
-                            mil_val = dep.soldiers * s_price + dep.dragons * d_price + dep.scorpions * sc_price
-                            try:
-                                await bot.send_message(
-                                    house.lord_id,
-                                    f"🏦 <b>Omonat kunlik foizi keldi!</b>\n\n"
-                                    f"📊 Omonat: {dep.gold + mil_val:,} tanga (umumiy)\n"
-                                    f"📈 +{interest:,} tanga xazinangizga tushdi\n"
-                                    f"⏳ Omonat tugashiga: {days_left} kun",
-                                    parse_mode="HTML"
+                            loser_msg = (
+                                f"🏦 <b>Omonat kunlik foizi keldi!</b>\n\n"
+                                f"📊 Omonat: {dep.gold + mil_val:,} tanga (umumiy)\n"
+                                f"📈 Kunlik foiz: {interest:,} tanga\n"
+                            )
+                            if winner_share > 0:
+                                loser_msg += (
+                                    f"💸 Sizga: <b>{loser_share:,} tanga</b> (yarmi urush g'olibiga ketdi)\n"
                                 )
+                            else:
+                                loser_msg += f"💰 Sizga: <b>{interest:,} tanga</b>\n"
+                            loser_msg += f"⏳ Omonat tugashiga: {days_left} kun"
+                            try:
+                                await bot.send_message(house.lord_id, loser_msg, parse_mode="HTML")
                             except Exception:
                                 pass
+
+                        # G'olibga xabar (agar flag bo'lsa)
+                        if winner_share > 0 and dep.war_winner_house_id:
+                            winner_house = await house_repo.get_by_id(dep.war_winner_house_id)
+                            if winner_house and winner_house.lord_id:
+                                try:
+                                    await bot.send_message(
+                                        winner_house.lord_id,
+                                        f"🏦 <b>Omonat foizi bonusi keldi!</b>\n\n"
+                                        f"⚔️ <b>{house.name if house else ''}</b> omonatidan\n"
+                                        f"💰 <b>+{winner_share:,} tanga</b> xazinangizga tushdi",
+                                        parse_mode="HTML"
+                                    )
+                                except Exception:
+                                    pass
         except Exception as e:
             logger.error(f"Omonat #{dep_id} tekshiruvida xato: {e}")
 
