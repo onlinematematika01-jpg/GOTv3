@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 # Global scheduler referensini saqlash uchun — circular import muammosini hal qiladi
 _global_scheduler: AsyncIOScheduler | None = None
+_global_bot = None
 
 
 def set_global_scheduler(scheduler: AsyncIOScheduler):
@@ -22,11 +23,29 @@ def set_global_scheduler(scheduler: AsyncIOScheduler):
     _global_scheduler = scheduler
 
 
+def set_global_bot(bot):
+    global _global_bot
+    _global_bot = bot
+
+
 def get_global_scheduler() -> AsyncIOScheduler:
     if _global_scheduler is None:
         raise RuntimeError("Scheduler hali o'rnatilmagan. set_global_scheduler() chaqiring.")
     return _global_scheduler
 
+
+async def reload_deposit_job(hour: int, minute: int):
+    """Admin foiz vaqtini o'zgartirganida deposit_check jobini qayta yuklaydi"""
+    scheduler = get_global_scheduler()
+    bot = _global_bot
+    scheduler.add_job(
+        process_deposits_job,
+        CronTrigger(hour=hour, minute=minute, timezone="Asia/Tashkent"),
+        args=[bot],
+        id="deposit_check",
+        replace_existing=True,
+    )
+    logger.info(f"Deposit job qayta yuklandi: {hour:02d}:{minute:02d} Tashkent")
 
 async def daily_farm_job(bot: Bot, scheduled_amount: int = 0):
     """Kunlik farm: jadval bo'yicha belgilangan miqdorni xonadon xazinasiga qo'shadi.
@@ -652,14 +671,21 @@ async def setup_scheduler(scheduler: AsyncIOScheduler, bot: Bot):
         replace_existing=True,
     )
 
-    # Omonat: kunlik foiz + muddat tugaganlarni yopish — har kuni 01:00 Tashkent
+    # Omonat: kunlik foiz + muddat tugaganlarni yopish — vaqt DB dan olinadi
+    async with AsyncSessionFactory() as session:
+        from database.repositories import BotSettingsRepo as _BSR
+        _cfg = _BSR(session)
+        dep_hour   = await _cfg.get_int("deposit_job_hour")
+        dep_minute = await _cfg.get_int("deposit_job_minute")
+
     scheduler.add_job(
         process_deposits_job,
-        CronTrigger(hour=1, minute=0, timezone="Asia/Tashkent"),
+        CronTrigger(hour=dep_hour, minute=dep_minute, timezone="Asia/Tashkent"),
         args=[bot],
         id="deposit_check",
         replace_existing=True,
     )
+    logger.info(f"Deposit job: har kuni {dep_hour:02d}:{dep_minute:02d} Tashkent")
 
     logger.info("Scheduler jobs o'rnatildi")
 
