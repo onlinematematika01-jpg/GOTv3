@@ -4,7 +4,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from datetime import datetime, timedelta, timezone
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo, IronBankRepo, BotSettingsRepo, ChronicleRepo
+from database.repositories import UserRepo, HouseRepo, IronBankRepo, BotSettingsRepo, ChronicleRepo, IronBankDepositRepo
+from sqlalchemy import update
 from database.models import IronBankLoan
 from keyboards import iron_bank_keyboard, back_only_keyboard
 from config.settings import settings
@@ -327,3 +328,337 @@ async def bank_status(callback: CallbackQuery):
             reply_markup=back_only_keyboard("bank:back"),
             parse_mode="HTML"
         )
+
+
+# ═══════════════════════════════════════════════════════
+#  OMONAT TIZIMI
+# ═══════════════════════════════════════════════════════
+
+class DepositState(StatesGroup):
+    waiting_gold     = State()
+    waiting_soldiers = State()
+    waiting_dragons  = State()
+    waiting_scorpions = State()
+
+
+async def _get_deposit_settings() -> dict:
+    async with AsyncSessionFactory() as session:
+        repo = BotSettingsRepo(session)
+        return {
+            "rate_per_day": await repo.get_float("deposit_rate_per_day"),   # kunlik foiz
+            "duration_days": await repo.get_int("deposit_duration_days"),   # muddat (kun)
+        }
+
+
+@router.callback_query(F.data == "bank:deposit_menu")
+async def deposit_menu(callback: CallbackQuery):
+    from database.repositories import IronBankDepositRepo
+    from database.models import RoleEnum
+    async with AsyncSessionFactory() as session:
+        user_repo = UserRepo(session)
+        house_repo = HouseRepo(session)
+        user = await user_repo.get_by_id(callback.from_user.id)
+        if not user or not user.house_id:
+            await callback.answer("❌ Xonadoningiz yo'q.", show_alert=True)
+            return
+        house = await house_repo.get_by_id(user.house_id)
+        dep_repo = IronBankDepositRepo(session)
+        deposit = await dep_repo.get_active(user.house_id)
+        cfg = await _get_deposit_settings()
+
+    rate_pct = cfg["rate_per_day"] * 100
+    days = cfg["duration_days"]
+    total_pct = rate_pct * days
+
+    if deposit:
+        from datetime import datetime, timezone
+        expires_tz = deposit.expires_at.replace(tzinfo=timezone.utc) + TASHKENT
+        days_left = max(0, (deposit.expires_at - datetime.utcnow()).days)
+        text = (
+            "🏦 <b>TEMIR BANK — OMONAT</b>\n\n"
+            "📦 <b>Faol omonat:</b>\n"
+            f"💰 Oltin: {deposit.gold:,} tanga\n"
+            f"🗡️ Askarlar: {deposit.soldiers:,}\n"
+            f"🐉 Ajdarlar: {deposit.dragons:,}\n"
+            f"🏹 Skorpionlar: {deposit.scorpions:,}\n\n"
+            f"📅 Muddat tugashi: {expires_tz.strftime('%Y-%m-%d')} (Toshkent)\n"
+            f"⏳ Qolgan kun: {days_left}\n\n"
+            f"📈 Kunlik foiz: {rate_pct:.1f}%\n"
+            "🛡️ Omonat urushdan himoyalangan!"
+        )
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📤 Omonatni yopish", callback_data="bank:deposit_close")],
+            [InlineKeyboardButton(text="🔙 Orqaga", callback_data="bank:back")],
+        ])
+    else:
+        text = (
+            "🏦 <b>TEMIR BANK — OMONAT</b>\n\n"
+            f"📈 Kunlik foiz: <b>{rate_pct:.1f}%</b>\n"
+            f"📅 Muddat: <b>{days} kun</b>\n"
+            f"💹 Jami foiz: <b>{total_pct:.1f}%</b>\n\n"
+            "📦 Omonatga qo'yilgan resurslar urush paytida <b>himoyalangan</b> va jangda qatnashmaydi.\n"
+            "💰 Foiz kunlik ravishda xazinaga tushadi.\n\n"
+            f"🏦 Xazina: {house.treasury:,} tanga\n"
+            f"🗡️ Askarlar: {house.total_soldiers:,}\n"
+            f"🐉 Ajdarlar: {house.total_dragons:,}\n"
+            f"🏹 Skorpionlar: {house.total_scorpions:,}"
+        )
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📥 Omonat ochish", callback_data="bank:deposit_start")],
+            [InlineKeyboardButton(text="🔙 Orqaga", callback_data="bank:back")],
+        ])
+
+    await callback.answer()
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "bank:deposit_start")
+async def deposit_start(callback: CallbackQuery, state: FSMContext):
+    from database.models import RoleEnum
+    from database.repositories import IronBankDepositRepo
+    async with AsyncSessionFactory() as session:
+        user_repo = UserRepo(session)
+        house_repo = HouseRepo(session)
+        user = await user_repo.get_by_id(callback.from_user.id)
+        if not user or user.role not in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
+            await callback.answer("❌ Faqat xonadon lordi omonat ocha oladi.", show_alert=True)
+            return
+        dep_repo = IronBankDepositRepo(session)
+        existing = await dep_repo.get_active(user.house_id)
+        if existing:
+            await callback.answer("❌ Allaqachon faol omonat mavjud.", show_alert=True)
+            return
+        house = await house_repo.get_by_id(user.house_id)
+        await state.update_data(house_id=user.house_id)
+
+    cfg = await _get_deposit_settings()
+    await state.set_state(DepositState.waiting_gold)
+    await callback.answer()
+    await callback.message.answer(
+        f"📥 <b>Omonat ochish</b>\n\n"
+        f"📈 Kunlik foiz: {cfg['rate_per_day']*100:.1f}%  |  📅 Muddat: {cfg['duration_days']} kun\n\n"
+        f"💰 Xazinadan omonatga qo'ymoqchi bo'lgan <b>oltin miqdorini</b> kiriting:\n"
+        f"(0 kiriting — oltin qo'ymaslik)\n\n"
+        f"Bekor qilish: /cancel",
+        parse_mode="HTML"
+    )
+
+
+@router.message(DepositState.waiting_gold)
+async def deposit_gold(message: Message, state: FSMContext):
+    if message.text.strip().lower() == "/cancel":
+        await state.clear()
+        await message.answer("❌ Bekor qilindi.")
+        return
+    try:
+        amount = int(message.text.strip())
+        if amount < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Noto'g'ri raqam. Qayta kiriting:")
+        return
+
+    async with AsyncSessionFactory() as session:
+        house_repo = HouseRepo(session)
+        data = await state.get_data()
+        house = await house_repo.get_by_id(data["house_id"])
+        if amount > house.treasury:
+            await message.answer(f"❌ Xazinada {house.treasury:,} tanga bor. Kamroq kiriting:")
+            return
+        if amount > 0:
+            await session.execute(
+                update(House).where(House.id == house.id).values(treasury=House.treasury - amount)
+            )
+            await session.commit()
+
+    await state.update_data(gold=amount)
+    await state.set_state(DepositState.waiting_soldiers)
+    await message.answer(
+        f"✅ Oltin: {amount:,}\n\n"
+        f"🗡️ Omonatga qo'ymoqchi bo'lgan <b>askar soni</b>ni kiriting:\n"
+        f"(0 — askar qo'ymaslik)"
+    )
+
+
+@router.message(DepositState.waiting_soldiers)
+async def deposit_soldiers(message: Message, state: FSMContext):
+    if message.text.strip().lower() == "/cancel":
+        # Oltinni qaytarish
+        data = await state.get_data()
+        async with AsyncSessionFactory() as session:
+            await session.execute(
+                update(House).where(House.id == data["house_id"]).values(
+                    treasury=House.treasury + data.get("gold", 0)
+                )
+            )
+            await session.commit()
+        await state.clear()
+        await message.answer("❌ Bekor qilindi. Oltin qaytarildi.")
+        return
+    try:
+        amount = int(message.text.strip())
+        if amount < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Noto'g'ri raqam:")
+        return
+
+    async with AsyncSessionFactory() as session:
+        house_repo = HouseRepo(session)
+        data = await state.get_data()
+        house = await house_repo.get_by_id(data["house_id"])
+        if amount > house.total_soldiers:
+            await message.answer(f"❌ Xonadoningizda {house.total_soldiers:,} askar bor:")
+            return
+        if amount > 0:
+            await house_repo.update_military(house.id, soldiers=-amount)
+
+    await state.update_data(soldiers=amount)
+    await state.set_state(DepositState.waiting_dragons)
+    await message.answer(
+        f"✅ Askarlar: {amount:,}\n\n"
+        f"🐉 Omonatga qo'ymoqchi bo'lgan <b>ajdar soni</b>ni kiriting:\n"
+        f"(0 — ajdar qo'ymaslik)"
+    )
+
+
+@router.message(DepositState.waiting_dragons)
+async def deposit_dragons(message: Message, state: FSMContext):
+    if message.text.strip().lower() == "/cancel":
+        data = await state.get_data()
+        async with AsyncSessionFactory() as session:
+            house_repo = HouseRepo(session)
+            await session.execute(
+                update(House).where(House.id == data["house_id"]).values(
+                    treasury=House.treasury + data.get("gold", 0)
+                )
+            )
+            await house_repo.update_military(data["house_id"], soldiers=data.get("soldiers", 0))
+            await session.commit()
+        await state.clear()
+        await message.answer("❌ Bekor qilindi. Resurslar qaytarildi.")
+        return
+    try:
+        amount = int(message.text.strip())
+        if amount < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Noto'g'ri raqam:")
+        return
+
+    async with AsyncSessionFactory() as session:
+        house_repo = HouseRepo(session)
+        data = await state.get_data()
+        house = await house_repo.get_by_id(data["house_id"])
+        if amount > house.total_dragons:
+            await message.answer(f"❌ Xonadoningizda {house.total_dragons:,} ajdar bor:")
+            return
+        if amount > 0:
+            await house_repo.update_military(house.id, dragons=-amount)
+
+    await state.update_data(dragons=amount)
+    await state.set_state(DepositState.waiting_scorpions)
+    await message.answer(
+        f"✅ Ajdarlar: {amount:,}\n\n"
+        f"🏹 Omonatga qo'ymoqchi bo'lgan <b>skorpion soni</b>ni kiriting:\n"
+        f"(0 — skorpion qo'ymaslik)"
+    )
+
+
+@router.message(DepositState.waiting_scorpions)
+async def deposit_scorpions(message: Message, state: FSMContext):
+    if message.text.strip().lower() == "/cancel":
+        data = await state.get_data()
+        async with AsyncSessionFactory() as session:
+            house_repo = HouseRepo(session)
+            await session.execute(
+                update(House).where(House.id == data["house_id"]).values(
+                    treasury=House.treasury + data.get("gold", 0)
+                )
+            )
+            await house_repo.update_military(
+                data["house_id"],
+                soldiers=data.get("soldiers", 0),
+                dragons=data.get("dragons", 0),
+            )
+            await session.commit()
+        await state.clear()
+        await message.answer("❌ Bekor qilindi. Resurslar qaytarildi.")
+        return
+    try:
+        amount = int(message.text.strip())
+        if amount < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Noto'g'ri raqam:")
+        return
+
+    async with AsyncSessionFactory() as session:
+        house_repo = HouseRepo(session)
+        dep_repo = IronBankDepositRepo(session)
+        data = await state.get_data()
+        house = await house_repo.get_by_id(data["house_id"])
+        if amount > house.total_scorpions:
+            await message.answer(f"❌ Xonadoningizda {house.total_scorpions:,} skorpion bor:")
+            return
+        if amount > 0:
+            await house_repo.update_military(house.id, scorpions=-amount)
+
+        cfg = await _get_deposit_settings()
+        dep = await dep_repo.create(
+            house_id=data["house_id"],
+            gold=data.get("gold", 0),
+            soldiers=data.get("soldiers", 0),
+            dragons=data.get("dragons", 0),
+            scorpions=amount,
+            rate_per_day=cfg["rate_per_day"],
+            duration_days=cfg["duration_days"],
+        )
+
+    from datetime import datetime, timezone
+    expires_tz = dep.expires_at.replace(tzinfo=timezone.utc) + TASHKENT
+    await state.clear()
+    await message.answer(
+        f"✅ <b>Omonat muvaffaqiyatli ochildi!</b>\n\n"
+        f"💰 Oltin: {dep.gold:,} tanga\n"
+        f"🗡️ Askarlar: {dep.soldiers:,}\n"
+        f"🐉 Ajdarlar: {dep.dragons:,}\n"
+        f"🏹 Skorpionlar: {dep.scorpions:,}\n\n"
+        f"📈 Kunlik foiz: {dep.interest_rate_per_day*100:.1f}%\n"
+        f"📅 Muddat: {dep.duration_days} kun\n"
+        f"🗓️ Tugash sanasi: {expires_tz.strftime('%Y-%m-%d')}\n\n"
+        f"🛡️ Omonatdagi resurslar urushdan himoyalangan!",
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "bank:deposit_close")
+async def deposit_close(callback: CallbackQuery):
+    from database.models import RoleEnum
+    from database.repositories import IronBankDepositRepo
+    async with AsyncSessionFactory() as session:
+        user_repo = UserRepo(session)
+        user = await user_repo.get_by_id(callback.from_user.id)
+        if not user or user.role not in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
+            await callback.answer("❌ Faqat xonadon lordi omonatni yopa oladi.", show_alert=True)
+            return
+        dep_repo = IronBankDepositRepo(session)
+        deposit = await dep_repo.get_active(user.house_id)
+        if not deposit:
+            await callback.answer("❌ Faol omonat topilmadi.", show_alert=True)
+            return
+        interest = await dep_repo.close(deposit, pay_interest=True)
+
+    await callback.answer()
+    await callback.message.edit_text(
+        f"📤 <b>Omonat yopildi!</b>\n\n"
+        f"💰 Oltin qaytarildi: {deposit.gold:,} tanga\n"
+        f"🗡️ Askarlar qaytarildi: {deposit.soldiers:,}\n"
+        f"🐉 Ajdarlar qaytarildi: {deposit.dragons:,}\n"
+        f"🏹 Skorpionlar qaytarildi: {deposit.scorpions:,}\n"
+        f"📈 Foiz daromadi: +{interest:,} tanga\n\n"
+        f"✅ Barcha resurslar xonadoningizga qaytarildi!",
+        parse_mode="HTML"
+    )
