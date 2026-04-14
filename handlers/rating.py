@@ -3,7 +3,8 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database.engine import AsyncSessionFactory
-from database.repositories import RatingRepo, CustomItemRepo, AllianceGroupRepo
+from database.repositories import RatingRepo, CustomItemRepo, AllianceGroupRepo, HouseRepo
+from database.models import RegionEnum
 from keyboards import rating_menu_keyboard
 
 router = Router()
@@ -191,6 +192,96 @@ def _build_deposit_page(data: list, page: int) -> str:
     return "\n".join(lines)
 
 
+REGION_EMOJIS = {
+    "Shimol": "❄️",
+    "Vodiy": "🏔️",
+    "Daryo yerlari": "🌊",
+    "Temir orollar": "⚓",
+    "G'arbiy yerlar": "💎",
+    "Qirollik bandargohi": "👑",
+    "Tyrellar vodiysi": "🌹",
+    "Bo'ronli yerlar": "⛈️",
+    "Dorn": "☀️",
+}
+
+
+async def _get_regions_data(session) -> list:
+    house_repo = HouseRepo(session)
+    alliance_repo = AllianceGroupRepo(session)
+    item_repo = CustomItemRepo(session)
+
+    all_houses = await house_repo.get_all()
+    # Load all active alliance groups for power calc
+    all_alliances = await alliance_repo.get_alliance_power_ranking(limit=1000)
+
+    result = []
+    for region in RegionEnum:
+        houses = [h for h in all_houses if h.region == region]
+        if not houses:
+            continue
+
+        # Hukmdorni topish (high_lord_id bor xonadon)
+        ruler_house = next((h for h in houses if h.high_lord_id is not None), None)
+
+        # Umumiy harbiy kuch (xonadonlar + custom items)
+        total_power = 0
+        for h in houses:
+            items = await item_repo.get_house_items_with_info(h.id)
+            extra = sum(r.item.attack_power * r.quantity + r.item.defense_power * r.quantity for r in items)
+            base = h.total_soldiers + h.total_dragons * 200 + h.total_scorpions * 25
+            total_power += base + extra
+
+        total_soldiers = sum(h.total_soldiers for h in houses)
+        total_dragons = sum(h.total_dragons for h in houses)
+        total_scorpions = sum(h.total_scorpions for h in houses)
+
+        # Ushbu hududdagi kuchli ittifoqlar
+        region_alliances = []
+        for entry in all_alliances:
+            member_house_ids = {m.house_id for m in entry["group"].members if m.house}
+            region_house_ids = {h.id for h in houses}
+            overlap = member_house_ids & region_house_ids
+            if overlap:
+                region_alliances.append(entry)
+
+        result.append({
+            "region": region,
+            "houses": houses,
+            "house_count": len(houses),
+            "ruler_house": ruler_house,
+            "total_power": total_power,
+            "total_soldiers": total_soldiers,
+            "total_dragons": total_dragons,
+            "total_scorpions": total_scorpions,
+            "alliances": region_alliances[:3],  # top 3
+        })
+
+    result.sort(key=lambda x: x["total_power"], reverse=True)
+    return result
+
+
+def _build_regions_page(data: list, page: int) -> str:
+    start = page * PAGE_SIZE
+    lines = ["🗺️ <b>HUDUDLAR HOLATI</b>\n"]
+    for i, entry in enumerate(data[start: start + PAGE_SIZE]):
+        region = entry["region"]
+        emoji = REGION_EMOJIS.get(region.value, "🏴")
+        ruler_text = f"👑 <b>{entry['ruler_house'].name}</b>" if entry["ruler_house"] else "⚠️ <i>Hukmdorsiz</i>"
+
+        alliance_text = ""
+        if entry["alliances"]:
+            names = ", ".join(a["group"].name for a in entry["alliances"])
+            alliance_text = f"\n   ⚔️ Ittifoqlar: <i>{names}</i>"
+
+        lines.append(
+            f"{emoji} <b>{region.value}</b>\n"
+            f"   🏠 Xonadonlar: {entry['house_count']} ta  |  {ruler_text}\n"
+            f"   ⚡ {entry['total_power']:,}  |  🗡️ {entry['total_soldiers']:,}  🐉 {entry['total_dragons']}  🏹 {entry['total_scorpions']}"
+            + alliance_text
+        )
+    return "\n\n".join(lines)
+
+
 RATING_HANDLERS = {
     "power":     (_get_power_data,     _build_power_page),
     "soldiers":  (_get_soldiers_data,  _build_soldiers_page),
@@ -199,6 +290,7 @@ RATING_HANDLERS = {
     "wins":      (_get_wins_data,      _build_wins_page),
     "alliances": (_get_alliances_data, _build_alliances_page),
     "deposit":   (_get_deposit_data,   _build_deposit_page),
+    "regions":   (_get_regions_data,   _build_regions_page),
 }
 
 
@@ -273,6 +365,10 @@ async def rating_alliances(callback: CallbackQuery):
 @router.callback_query(F.data == "rating:deposit")
 async def rating_deposit(callback: CallbackQuery):
     await _show_rating(callback, "deposit", 0)
+
+@router.callback_query(F.data == "rating:regions")
+async def rating_regions(callback: CallbackQuery):
+    await _show_rating(callback, "regions", 0)
 
 
 @router.callback_query(F.data.startswith("rating_page:"))
