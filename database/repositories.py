@@ -1299,7 +1299,8 @@ class IronBankDepositRepo:
 
     async def pay_daily_interest(self, deposit: "IronBankDeposit",
                                   s_price: int = None, d_price: int = None, sc_price: int = None):
-        """Kunlik foizni to'g'ridan-to'g'ri xazinaga o'tkazish"""
+        """Kunlik foizni to'g'ridan-to'g'ri xazinaga o'tkazish.
+        Agar omonatda war_winner_house_id bo'lsa — foizning yarmi g'olibga tushadi."""
         import math
         from config.settings import settings as cfg
         sp  = s_price  if s_price  is not None else cfg.SOLDIER_PRICE
@@ -1312,11 +1313,41 @@ class IronBankDepositRepo:
         )
         total = deposit.gold + mil_val
         interest = math.floor(total * deposit.interest_rate_per_day)
-        if interest > 0:
+        if interest <= 0:
+            return interest, 0
+
+        if deposit.war_winner_house_id:
+            winner_share = math.floor(interest * 0.5)
+            loser_share  = interest - winner_share
+            # Mag'lubga yarmi
+            await self.session.execute(
+                update(House).where(House.id == deposit.house_id).values(
+                    treasury=House.treasury + loser_share,
+                )
+            )
+            # G'olibga yarmi
+            await self.session.execute(
+                update(House).where(House.id == deposit.war_winner_house_id).values(
+                    treasury=House.treasury + winner_share,
+                )
+            )
+        else:
             await self.session.execute(
                 update(House).where(House.id == deposit.house_id).values(
                     treasury=House.treasury + interest,
                 )
             )
-            await self.session.commit()
-        return interest
+            winner_share = 0
+
+        await self.session.commit()
+        return interest, winner_share
+
+    async def set_war_winner(self, deposit_id: int, winner_house_id: int):
+        """Urush tugaganda mag'lubning omonatiga g'olib flag qo'yish"""
+        from database.models import IronBankDeposit
+        await self.session.execute(
+            update(IronBankDeposit).where(IronBankDeposit.id == deposit_id).values(
+                war_winner_house_id=winner_house_id
+            )
+        )
+        await self.session.commit()
