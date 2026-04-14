@@ -242,8 +242,11 @@ def calculate_battle(
                 f"({total_scorp_equiv} skorpion ekvivalenti) → mudofaachi {killed} ajdar halok"
             )
 
-    att_scorpions = 0
-    def_scorpions = 0
+    # Faqat ishlatilgan skorpionlarni ayiramiz (ajdarga duch kelgan)
+    att_scorpions_used = min(att_scorpions, att_dragons_killed * settings.SCORPIONS_PER_DRAGON)
+    def_scorpions_used = min(def_scorpions, def_dragons_killed * settings.SCORPIONS_PER_DRAGON)
+    att_scorpions -= att_scorpions_used
+    def_scorpions -= def_scorpions_used
 
     r1_log.append(
         f"📊 Natija: Hujumchi {att_dragons} ajdar | Mudofaachi {def_dragons} ajdar qoldi"
@@ -437,10 +440,10 @@ def calculate_battle(
     def_soldiers_lost  = max(0, min(def_real_soldiers_start, def_total_lost - def_soldier_item_bonus))
 
     att_dragons_lost   = max(0, att_dragons_start - att_dragons)
-    att_scorpions_lost = attacker_house.total_scorpions
+    att_scorpions_lost = att_scorpions_used  # faqat ajdarni o'ldirgan skorpionlar yo'qoladi
 
     def_dragons_lost   = max(0, def_dragons_start - def_dragons)
-    def_scorpions_lost = defender_house.total_scorpions
+    def_scorpions_lost = def_scorpions_used  # faqat ajdarni o'ldirgan skorpionlar yo'qoladi
 
     # Ittifoqchi yo'qotmalari
     def _ally_loss(ally, side_wins, side_soldiers_lost, side_total_soldiers):
