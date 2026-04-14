@@ -335,12 +335,24 @@ async def bank_status(callback: CallbackQuery):
 # ═══════════════════════════════════════════════════════
 
 # Harbiy narxlar (settings dan)
-def _military_value(soldiers: int, dragons: int, scorpions: int) -> int:
+def _military_value(soldiers: int, dragons: int, scorpions: int,
+                    s_price: int = None, d_price: int = None, sc_price: int = None) -> int:
     return (
-        soldiers  * settings.SOLDIER_PRICE +
-        dragons   * settings.DRAGON_PRICE  +
-        scorpions * settings.SCORPION_PRICE
+        soldiers  * (s_price  if s_price  is not None else settings.SOLDIER_PRICE) +
+        dragons   * (d_price  if d_price  is not None else settings.DRAGON_PRICE)  +
+        scorpions * (sc_price if sc_price is not None else settings.SCORPION_PRICE)
     )
+
+
+async def _get_market_prices(session) -> tuple:
+    """Bozordagi joriy harbiy narxlarni qaytaradi: (askar, ajdar, skorpion)"""
+    from database.repositories import MarketRepo
+    market_repo = MarketRepo(session)
+    prices = await market_repo.get_all_prices()
+    s  = prices.get("soldier",  settings.SOLDIER_PRICE)
+    d  = prices.get("dragon",   settings.DRAGON_PRICE)
+    sc = prices.get("scorpion", settings.SCORPION_PRICE)
+    return s, d, sc
 
 
 class DepositState(StatesGroup):
@@ -374,6 +386,7 @@ async def deposit_menu(callback: CallbackQuery):
         dep_repo = IronBankDepositRepo(session)
         deposit = await dep_repo.get_active(user.house_id)
         cfg = await _get_deposit_settings()
+        s_price, d_price, sc_price = await _get_market_prices(session)
 
     rate_pct = cfg["rate_per_day"] * 100
     days = cfg["duration_days"]
@@ -383,14 +396,15 @@ async def deposit_menu(callback: CallbackQuery):
         from datetime import datetime, timezone
         expires_tz = deposit.expires_at.replace(tzinfo=timezone.utc) + TASHKENT
         days_left = max(0, (deposit.expires_at - datetime.utcnow()).days)
-        mil_val = _military_value(deposit.soldiers, deposit.dragons, deposit.scorpions)
+        mil_val = _military_value(deposit.soldiers, deposit.dragons, deposit.scorpions,
+                                  s_price, d_price, sc_price)
         text = (
             "🏦 <b>TEMIR BANK — OMONAT</b>\n\n"
             "📦 <b>Faol omonat:</b>\n"
             f"💰 Oltin: {deposit.gold:,} tanga\n"
-            f"🗡️ Askarlar: {deposit.soldiers:,} ({deposit.soldiers * settings.SOLDIER_PRICE:,} tanga)\n"
-            f"🐉 Ajdarlar: {deposit.dragons:,} ({deposit.dragons * settings.DRAGON_PRICE:,} tanga)\n"
-            f"🏹 Skorpionlar: {deposit.scorpions:,} ({deposit.scorpions * settings.SCORPION_PRICE:,} tanga)\n"
+            f"🗡️ Askarlar: {deposit.soldiers:,} ({deposit.soldiers * s_price:,} tanga)\n"
+            f"🐉 Ajdarlar: {deposit.dragons:,} ({deposit.dragons * d_price:,} tanga)\n"
+            f"🏹 Skorpionlar: {deposit.scorpions:,} ({deposit.scorpions * sc_price:,} tanga)\n"
             f"📊 Umumiy omonat: <b>{deposit.gold + mil_val:,} tanga</b>\n\n"
             f"📅 Muddat tugashi: {expires_tz.strftime('%Y-%m-%d')} (Toshkent)\n"
             f"⏳ Qolgan kun: {days_left}\n\n"
@@ -622,15 +636,14 @@ async def deposit_scorpions(message: Message, state: FSMContext):
             await house_repo.update_military(house.id, scorpions=-amount)
 
         cfg = await _get_deposit_settings()
+        s_price, d_price, sc_price = await _get_market_prices(session)
         gold_in = data.get("gold", 0)
         soldiers_in = data.get("soldiers", 0)
         dragons_in = data.get("dragons", 0)
         scorpions_in = amount
-        # Umumiy oltin ekvivalenti (foiz shu summadan hisoblanadi)
-        total_gold = gold_in + _military_value(soldiers_in, dragons_in, scorpions_in)
         dep = await dep_repo.create(
             house_id=data["house_id"],
-            gold=total_gold,
+            gold=gold_in,
             soldiers=soldiers_in,
             dragons=dragons_in,
             scorpions=scorpions_in,
@@ -640,16 +653,16 @@ async def deposit_scorpions(message: Message, state: FSMContext):
 
     from datetime import datetime, timezone
     expires_tz = dep.expires_at.replace(tzinfo=timezone.utc) + TASHKENT
-    mil_val = _military_value(dep.soldiers, dep.dragons, dep.scorpions)
-    pure_gold = dep.gold - mil_val
+    mil_val = _military_value(dep.soldiers, dep.dragons, dep.scorpions, s_price, d_price, sc_price)
+    total_val = dep.gold + mil_val
     await state.clear()
     await message.answer(
         f"✅ <b>Omonat muvaffaqiyatli ochildi!</b>\n\n"
-        f"💰 Oltin: {pure_gold:,} tanga\n"
-        f"🗡️ Askarlar: {dep.soldiers:,} ({dep.soldiers * settings.SOLDIER_PRICE:,} tanga)\n"
-        f"🐉 Ajdarlar: {dep.dragons:,} ({dep.dragons * settings.DRAGON_PRICE:,} tanga)\n"
-        f"🏹 Skorpionlar: {dep.scorpions:,} ({dep.scorpions * settings.SCORPION_PRICE:,} tanga)\n"
-        f"📊 Umumiy omonat: <b>{dep.gold:,} tanga</b>\n\n"
+        f"💰 Oltin: {dep.gold:,} tanga\n"
+        f"🗡️ Askarlar: {dep.soldiers:,} ({dep.soldiers * s_price:,} tanga)\n"
+        f"🐉 Ajdarlar: {dep.dragons:,} ({dep.dragons * d_price:,} tanga)\n"
+        f"🏹 Skorpionlar: {dep.scorpions:,} ({dep.scorpions * sc_price:,} tanga)\n"
+        f"📊 Umumiy omonat: <b>{total_val:,} tanga</b>\n\n"
         f"📈 Kunlik foiz: {dep.interest_rate_per_day*100:.1f}%\n"
         f"📅 Muddat: {dep.duration_days} kun\n"
         f"🗓️ Tugash sanasi: {expires_tz.strftime('%Y-%m-%d')}\n\n"
@@ -673,14 +686,14 @@ async def deposit_close(callback: CallbackQuery):
         if not deposit:
             await callback.answer("❌ Faol omonat topilmadi.", show_alert=True)
             return
-        interest = await dep_repo.close(deposit, pay_interest=True)
+        s_price, d_price, sc_price = await _get_market_prices(session)
+        interest = await dep_repo.close(deposit, pay_interest=True,
+                                        s_price=s_price, d_price=d_price, sc_price=sc_price)
 
-    mil_val = _military_value(deposit.soldiers, deposit.dragons, deposit.scorpions)
-    pure_gold = deposit.gold - mil_val
     await callback.answer()
     await callback.message.edit_text(
         f"📤 <b>Omonat yopildi!</b>\n\n"
-        f"💰 Oltin qaytarildi: {pure_gold:,} tanga\n"
+        f"💰 Oltin qaytarildi: {deposit.gold:,} tanga\n"
         f"🗡️ Askarlar qaytarildi: {deposit.soldiers:,}\n"
         f"🐉 Ajdarlar qaytarildi: {deposit.dragons:,}\n"
         f"🏹 Skorpionlar qaytarildi: {deposit.scorpions:,}\n"
