@@ -342,13 +342,13 @@ async def _run_war(war, bot, session):
         await house_repo.update_treasury(attacker.id, result.loot_gold)
         await house_repo.update_treasury(defender.id, -min(result.loot_gold, defender.treasury))
         await house_repo.update_military(attacker.id,
-            soldiers=-result.attacker_soldiers_lost,
-            dragons=-result.attacker_dragons_lost,
+            soldiers=-result.attacker_soldiers_lost + result.loot_soldiers,
+            dragons=-result.attacker_dragons_lost + result.loot_dragons,
             scorpions=-result.attacker_scorpions_lost,
         )
         await house_repo.update_military(defender.id,
-            soldiers=-result.defender_soldiers_lost,
-            dragons=-result.defender_dragons_lost,
+            soldiers=-result.defender_soldiers_lost - result.loot_soldiers,
+            dragons=-result.defender_dragons_lost - result.loot_dragons,
             scorpions=-result.defender_scorpions_lost,
         )
         # Custom itemlar o'ljasi — g'olib (attacker) yutilgan (defender) itemlarining 51% ini oladi
@@ -365,13 +365,13 @@ async def _run_war(war, bot, session):
         await house_repo.update_treasury(defender.id, result.loot_gold)
         await house_repo.update_treasury(attacker.id, -min(result.loot_gold, attacker.treasury))
         await house_repo.update_military(attacker.id,
-            soldiers=-result.attacker_soldiers_lost,
-            dragons=-result.attacker_dragons_lost,
+            soldiers=-result.attacker_soldiers_lost - result.loot_soldiers,
+            dragons=-result.attacker_dragons_lost - result.loot_dragons,
             scorpions=-result.attacker_scorpions_lost,
         )
         await house_repo.update_military(defender.id,
-            soldiers=-result.defender_soldiers_lost,
-            dragons=-result.defender_dragons_lost,
+            soldiers=-result.defender_soldiers_lost + result.loot_soldiers,
+            dragons=-result.defender_dragons_lost + result.loot_dragons,
             scorpions=-result.defender_scorpions_lost,
         )
         # Custom itemlar o'ljasi — g'olib (defender) yutilgan (attacker) itemlarining 51% ini oladi
