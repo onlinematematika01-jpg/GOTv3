@@ -195,10 +195,11 @@ async def process_loan(message: Message, state: FSMContext):
 async def request_repay(callback: CallbackQuery, state: FSMContext):
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
+        iron_bank_repo = IronBankRepo(session)
         user = await user_repo.get_by_id(callback.from_user.id)
 
-        if not user or user.debt <= 0:
-            await callback.answer("✅ Qarzingiz yo'q!", show_alert=True)
+        if not user or not user.house_id:
+            await callback.answer("❌ Xonadoningiz yo'q.", show_alert=True)
             return
 
         from database.models import RoleEnum
@@ -206,10 +207,16 @@ async def request_repay(callback: CallbackQuery, state: FSMContext):
             await callback.answer("❌ Faqat xonadon lordi qarz to'lay oladi.", show_alert=True)
             return
 
+        # user.debt emas — xonadonning haqiqiy qarzi (lord almashsa ham to'g'ri)
+        house_debt = await iron_bank_repo.get_house_active_debt(user.house_id)
+        if house_debt <= 0:
+            await callback.answer("✅ Xonadoningizda qarz yo'q!", show_alert=True)
+            return
+
     await state.set_state(BankState.waiting_repay_amount)
     await callback.answer()
     await callback.message.answer(
-        f"💸 <b>Qarzingiz:</b> {user.debt:,} tanga\n"
+        f"💸 <b>Xonadon qarzi:</b> {house_debt:,} tanga\n"
         f"Xonadon xazinasidan to'lash miqdorini kiriting (yoki 'hammasi'):\n\n"
         f"Bekor qilish uchun /cancel yozing.",
         parse_mode="HTML"
