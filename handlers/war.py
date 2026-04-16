@@ -474,6 +474,56 @@ async def do_surrender(callback: CallbackQuery):
         if attacker.is_under_occupation and attacker.occupier_house_id == defender.id:
             await house_repo.clear_occupation(attacker.id)
         await house_repo.set_occupation(defender.id, attacker.id, tax_rate=0.10)
+
+        # Agar defender HIGH_LORD bo'lgan bo'lsa — unvonini attacker ga o'tkazish
+        if defender.high_lord_id and attacker.region == defender.region:
+            from sqlalchemy import update as sa_update
+            from database.models import User as UserModel, RoleEnum as RE
+
+            # Defender HIGH_LORD unvonini yo'qotadi
+            defender.high_lord_id = None
+            await session.execute(
+                sa_update(UserModel)
+                .where(UserModel.id == defender.lord_id, UserModel.role == RE.HIGH_LORD)
+                .values(role=RE.LORD)
+            )
+            if defender.lord_id:
+                try:
+                    await callback.bot.send_message(
+                        defender.lord_id,
+                        f"👑 <b>HUKMDORLIK YO'QOLDI!</b>\n\n"
+                        f"Taslim bo'lganingiz sababli <b>{defender.region.value}</b> "
+                        f"hududidagi Hukmdorlik unvoningizni yo'qotdingiz.",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+
+            # Attacker HIGH_LORD bo'ladi
+            from database.models import House as HouseModel
+            from sqlalchemy import select as sa_select
+            attacker_fresh = (await session.execute(
+                sa_select(HouseModel).where(HouseModel.id == attacker.id)
+            )).scalar_one_or_none()
+            if attacker_fresh and attacker_fresh.lord_id:
+                attacker_fresh.high_lord_id = attacker_fresh.lord_id
+                await session.execute(
+                    sa_update(UserModel)
+                    .where(UserModel.id == attacker_fresh.lord_id)
+                    .values(role=RE.HIGH_LORD)
+                )
+                try:
+                    await callback.bot.send_message(
+                        attacker_fresh.lord_id,
+                        f"👑 <b>SIZ HUKMDOR BO'LDINGIZ!</b>\n\n"
+                        f"<b>{defender.region.value}</b> hududining "
+                        f"<b>HUKMDORI</b> bo'ldingiz!\n"
+                        f"Barcha vassal xonadonlar sizga o'lpon to'laydi.",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+
         await war_repo.end_war(war_id, attacker.id, loot["gold"], surrendered=True)
 
         text = format_chronicle(
