@@ -539,8 +539,103 @@ async def end_war_time_job(bot: Bot):
 
 
 async def _handle_lord_succession(session, war, bot):
-    """Mag'lub lord almashishi — o'chirilgan, lord surgun qilinmaydi"""
-    pass
+    """
+    Attacker yutganda rol o'tishi:
+    - Agar defender HIGH_LORD bo'lsa → defender LORD ga tushiriladi
+    - Agar attacker shu hududda defender o'rnini egallasa → attacker HIGH_LORD bo'ladi
+    """
+    from database.models import House, User, RoleEnum
+    from sqlalchemy import select
+
+    # Defender va attacker xonadonlarini olish
+    defender_result = await session.execute(
+        select(House).where(House.id == war.defender_house_id)
+    )
+    defender_house = defender_result.scalar_one_or_none()
+
+    attacker_result = await session.execute(
+        select(House).where(House.id == war.attacker_house_id)
+    )
+    attacker_house = attacker_result.scalar_one_or_none()
+
+    if not defender_house or not attacker_house:
+        return
+
+    # Agar defender HIGH_LORD bo'lsa — unvonini olib, LORD qilamiz
+    if defender_house.high_lord_id:
+        old_high_lord_user_id = defender_house.high_lord_id
+        defender_house.high_lord_id = None
+
+        # Foydalanuvchi rolini HIGH_LORD dan LORD ga tushirish
+        await session.execute(
+            update(User)
+            .where(
+                User.id == old_high_lord_user_id,
+                User.role == RoleEnum.HIGH_LORD
+            )
+            .values(role=RoleEnum.LORD)
+        )
+
+        # Defender lordiga xabar
+        if defender_house.lord_id:
+            try:
+                await bot.send_message(
+                    defender_house.lord_id,
+                    f"👑 <b>HUKMDORLIK YO'QOLDI!</b>\n\n"
+                    f"Siz jangda mag'lub bo'ldingiz va "
+                    f"<b>{defender_house.region.value}</b> hududidagi "
+                    f"Hukmdorlik unvoningizni yo'qotdingiz.\n"
+                    f"Xonadoningiz endi vassal maqomida.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+        # Attacker xonadonini HIGH_LORD qilish (faqat bir xududda bo'lsa)
+        # Attacker defender bilan bir hududda bo'lishi kerak
+        if attacker_house.region == defender_house.region and attacker_house.lord_id:
+            attacker_house.high_lord_id = attacker_house.lord_id
+
+            await session.execute(
+                update(User)
+                .where(User.id == attacker_house.lord_id)
+                .values(role=RoleEnum.HIGH_LORD)
+            )
+
+            # Hududdagi boshqa xonadonlarning HIGH_LORD unvonini bekor qilish
+            region_result = await session.execute(
+                select(House).where(
+                    House.region == attacker_house.region,
+                    House.id != attacker_house.id,
+                )
+            )
+            region_houses = region_result.scalars().all()
+            for rh in region_houses:
+                if rh.high_lord_id:
+                    rh.high_lord_id = None
+                    if rh.lord_id:
+                        await session.execute(
+                            update(User)
+                            .where(
+                                User.id == rh.lord_id,
+                                User.role == RoleEnum.HIGH_LORD
+                            )
+                            .values(role=RoleEnum.LORD)
+                        )
+
+            try:
+                await bot.send_message(
+                    attacker_house.lord_id,
+                    f"👑 <b>SIZ HUKMDOR BO'LDINGIZ!</b>\n\n"
+                    f"Jangda g'alaba qozonib, <b>{defender_house.region.value}</b> "
+                    f"hududining <b>HUKMDORI</b> bo'ldingiz!\n"
+                    f"Barcha vassal xonadonlar sizga o'lpon to'laydi.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+    await session.commit()
 
 
 async def check_iron_bank_debt_job(bot: Bot):
