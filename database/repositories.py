@@ -447,26 +447,42 @@ class IronBankRepo:
                 treasury=func.greatest(House.treasury - confiscate.get("gold", 0), 0),
             )
         )
-        # Qarz kamaytirish
-        result = await self.session.execute(
+        # Qarz kamaytirish — IronBankLoan.total_due ni repay kabi ketma-ket kamaytirish
+        loans_result = await self.session.execute(
+            select(IronBankLoan).where(
+                IronBankLoan.house_id == house_id,
+                IronBankLoan.paid == False,
+            )
+        )
+        active_loans = loans_result.scalars().all()
+        house_total_debt = sum(loan.total_due for loan in active_loans)
+
+        remaining = min(value, house_total_debt)
+        for loan in sorted(active_loans, key=lambda l: l.id):
+            if remaining <= 0:
+                break
+            if loan.total_due <= remaining:
+                remaining -= loan.total_due
+                loan.total_due = 0
+                loan.paid = True
+            else:
+                loan.total_due -= remaining
+                remaining = 0
+
+        new_debt = max(0, house_total_debt - value)
+
+        # lord.debt ni haqiqiy qarz bilan sinxronlashtirish
+        lord_result = await self.session.execute(
             select(User).where(
                 User.house_id == house_id,
                 User.role.in_([RoleEnum.LORD, RoleEnum.HIGH_LORD])
             )
         )
-        lord = result.scalars().first()
+        lord = lord_result.scalars().first()
         if lord:
-            new_debt = max(0, lord.debt - value)
             await self.session.execute(
                 update(User).where(User.id == lord.id).values(debt=new_debt)
             )
-            if new_debt == 0:
-                await self.session.execute(
-                    update(IronBankLoan).where(
-                        IronBankLoan.house_id == house_id,
-                        IronBankLoan.paid == False,
-                    ).values(paid=True)
-                )
         await self.session.commit()
         return value
 
