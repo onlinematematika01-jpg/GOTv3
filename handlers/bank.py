@@ -174,7 +174,7 @@ async def process_loan(message: Message, state: FSMContext):
             amount=amount,
             total_due=total_due,
         )
-        tg_id = await post_to_chronicle(message.bot, chronicle_text)
+        tg_id = await post_to_chronicle(message.bot, chronicle_text, channel="bank_market")
         await chronicle_repo.add("loan", chronicle_text, house_id=user.house_id, tg_msg_id=tg_id)
 
         # Muddatni Toshkent vaqtida ko'rsatish
@@ -270,7 +270,7 @@ async def process_repay(message: Message, state: FSMContext):
                 paid=result["paid"],
                 remaining=result["remaining"],
             )
-            tg_id = await post_to_chronicle(message.bot, chronicle_text)
+            tg_id = await post_to_chronicle(message.bot, chronicle_text, channel="bank_market")
             await chronicle_repo.add("repay", chronicle_text, house_id=user.house_id, tg_msg_id=tg_id)
 
             await message.answer(
