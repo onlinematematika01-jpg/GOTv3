@@ -242,7 +242,8 @@ async def _do_purchase(message, bot, user_id: int, item: str, qty: int, state: F
                 f"🏰 <b>{house.name}</b> xonadoni\n"
                 f"{item_label}: +{qty} ta sotib oldi\n"
                 f"💰 Sarflandi: {total_cost:,} tanga"
-            )
+            ,
+                channel="bank_market")
         except Exception:
             pass
     await state.clear()
@@ -381,7 +382,8 @@ async def _do_custom_purchase(message, bot, user_id: int, item_id: int, qty: int
                 f"{item.emoji} {item.name}: +{qty} ta sotib oldi\n"
                 f"💰 Sarflandi: {total_cost:,} tanga"
                 + (f"\n📦 Stokda qoldi: {item.stock_remaining - qty} ta" if item.stock_remaining is not None else "")
-            )
+            ,
+                channel="bank_market")
         except Exception:
             pass
     await state.clear()
