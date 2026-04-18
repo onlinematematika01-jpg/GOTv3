@@ -4,20 +4,38 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-async def post_to_chronicle(bot: Bot, text: str) -> int | None:
-    """Telegram kanalga voqea post qilish"""
-    if not settings.CHRONICLE_CHANNEL_ID:
+
+async def post_to_chronicle(bot: Bot, text: str, channel: str = "chronicle") -> int | None:
+    """Telegram kanalga voqea post qilish.
+
+    channel parametri:
+      "chronicle"    — asosiy voqealar kanali (CHRONICLE_CHANNEL_ID)
+      "bank_market"  — temir bank va bozor kanali (BANK_MARKET_CHANNEL_ID)
+                       agar BANK_MARKET_CHANNEL_ID yo'q bo'lsa, CHRONICLE_CHANNEL_ID ishlatiladi
+    """
+    if channel == "bank_market":
+        channel_id = settings.BANK_MARKET_CHANNEL_ID or settings.CHRONICLE_CHANNEL_ID
+    else:
+        channel_id = settings.CHRONICLE_CHANNEL_ID
+
+    logger.info(f"post_to_chronicle: channel={channel!r}, channel_id={channel_id!r}")
+
+    if not channel_id:
+        logger.warning(f"post_to_chronicle: channel_id topilmadi, yuborilmadi (channel={channel!r})")
         return None
+
     try:
         msg = await bot.send_message(
-            chat_id=settings.CHRONICLE_CHANNEL_ID,
+            chat_id=int(channel_id),
             text=text,
             parse_mode="HTML",
         )
+        logger.info(f"post_to_chronicle: xabar yuborildi chat_id={channel_id}, msg_id={msg.message_id}")
         return msg.message_id
     except Exception as e:
-        logger.error(f"Xronika post qilishda xato: {e}")
+        logger.error(f"post_to_chronicle xato (channel={channel!r}, chat_id={channel_id}): {e}")
         return None
+
 
 EMOJIS = {
     "war_declared": "⚔️",
@@ -57,7 +75,6 @@ async def post_war_power_update(bot: Bot, war_id: int):
         if not attacker or not defender:
             return
 
-        # Custom item kuchini hisoblash (xonadon uchun)
         def calc_item_power(items_with_info):
             atk = def_ = sol = 0
             lines = []
@@ -80,7 +97,6 @@ async def post_war_power_update(bot: Bot, war_id: int):
         att_item_atk, att_item_def, att_item_sol, att_item_lines = calc_item_power(att_items)
         def_item_atk, def_item_def, def_item_sol, def_item_lines = calc_item_power(def_items)
 
-        # Ittifoqchi yordamlarini yig'amiz
         sup_result = await session.execute(
             select(WarAllySupport).where(WarAllySupport.war_id == war_id)
         )
@@ -95,7 +111,6 @@ async def post_war_power_update(bot: Bot, war_id: int):
             ally = await house_repo.get_by_id(sup.ally_house_id)
             ally_name = ally.name if ally else f"#{sup.ally_house_id}"
 
-            # Ittifoqchi custom itemlari
             ally_item_atk = ally_item_def = ally_item_sol = 0
             if ally and sup.join_type == "full":
                 ally_items = await custom_repo.get_house_items_with_info(ally.id)
@@ -120,7 +135,6 @@ async def post_war_power_update(bot: Bot, war_id: int):
                 else:
                     def_allies.append(f"  └ {ally_name}: 🗡️{sup.soldiers} 🏹{sup.scorpions}")
 
-        # Jami kuch hisoblash (battle.py mantiqiga mos)
         from config.settings import settings as _s
         att_total_s = attacker.total_soldiers + att_ally_s
         att_total_sc = attacker.total_scorpions + att_ally_sc
@@ -128,9 +142,7 @@ async def post_war_power_update(bot: Bot, war_id: int):
             att_total_s
             + att_total_sc * 2
             + attacker.total_dragons * _s.DRAGON_KILLS_SOLDIERS
-            + att_item_atk
-            + att_item_def
-            + att_item_sol
+            + att_item_atk + att_item_def + att_item_sol
         )
 
         def_total_s = defender.total_soldiers + def_ally_s
@@ -139,9 +151,7 @@ async def post_war_power_update(bot: Bot, war_id: int):
             def_total_s
             + def_total_sc * 2
             + defender.total_dragons * _s.DRAGON_KILLS_SOLDIERS
-            + def_item_atk
-            + def_item_def
-            + def_item_sol
+            + def_item_atk + def_item_def + def_item_sol
         )
 
         total = att_power + def_power
@@ -174,6 +184,7 @@ async def post_war_power_update(bot: Bot, war_id: int):
         text += f"💪 Jami kuch: {def_power} | {def_bar} {def_pct}%"
 
     await post_to_chronicle(bot, text)
+
 
 def format_chronicle(event_type: str, **kwargs) -> str:
     templates = {
@@ -217,14 +228,12 @@ def format_chronicle(event_type: str, **kwargs) -> str:
             "🤝 <b>ITTIFOQ TUZILDI!</b>\n\n"
             "🏰 <b>{house1}</b> va <b>{house2}</b> ittifoq tuzdi."
         ),
-        # Yangi: qarz olish
         "loan": (
             "🏦 <b>TEMIR BANK: QARZ OLINDI!</b>\n\n"
             "🏰 <b>{house}</b> xonadoni Temir Bankdan qarz oldi.\n"
             "💰 Qarz miqdori: {amount:,} tanga\n"
             "📈 Foiz bilan qaytarish: {total_due:,} tanga"
         ),
-        # Yangi: qarz to'lash
         "repay": (
             "💸 <b>TEMIR BANK: QARZ TO'LANDI!</b>\n\n"
             "🏰 <b>{house}</b> xonadoni Temir Bankka qarz to'ladi.\n"
