@@ -8,6 +8,7 @@ from keyboards import market_keyboard, quantity_keyboard, back_only_keyboard
 from keyboards.keyboards import custom_item_market_keyboard
 from sqlalchemy import update
 from database.models import User, House, RoleEnum
+from handlers.war import is_war_time_async
 
 router = Router()
 
@@ -124,6 +125,10 @@ async def show_prices(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("market:buy:"))
 async def select_quantity(callback: CallbackQuery, state: FSMContext):
+    if await is_war_time_async():
+        await callback.answer("⚔️ Urush seansi davomida bozordan xarid qilib bo'lmaydi!", show_alert=True)
+        return
+
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
         user = await user_repo.get_by_id(callback.from_user.id)
@@ -253,6 +258,10 @@ async def _do_purchase(message, bot, user_id: int, item: str, qty: int, state: F
 
 @router.callback_query(F.data.startswith("market:custom:"))
 async def select_custom_quantity(callback: CallbackQuery, state: FSMContext):
+    if await is_war_time_async():
+        await callback.answer("⚔️ Urush seansi davomida bozordan xarid qilib bo'lmaydi!", show_alert=True)
+        return
+
     async with AsyncSessionFactory() as session:
         user_repo = UserRepo(session)
         user = await user_repo.get_by_id(callback.from_user.id)
