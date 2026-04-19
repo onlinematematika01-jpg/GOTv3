@@ -182,7 +182,14 @@ async def knight_appoint_confirm(callback: CallbackQuery):
             existing.soldiers  = 0
             existing.house_id  = lord.house_id
         else:
-            await knight_repo.create_profile(target_id, lord.house_id)
+            from database.models import KnightProfile
+            profile = KnightProfile(
+                user_id=target_id,
+                house_id=lord.house_id,
+                soldiers=0,
+                is_active=True,
+            )
+            session.add(profile)
 
         await session.commit()
 
