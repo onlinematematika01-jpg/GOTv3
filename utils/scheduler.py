@@ -521,7 +521,7 @@ async def check_grace_period_job(bot: Bot):
                 logger.info(f"Urush #{war.id} grace tugadi — jang boshlanmoqda")
                 await war_repo.update_status(war.id, WarStatusEnum.FIGHTING)
                 try:
-                    await _run_war(war, bot, session)
+                    await _run_war_v2(war, bot, session)
                 except Exception as e:
                     logger.error(f"Urush #{war.id} hisoblashda xato: {e}")
 
@@ -569,9 +569,364 @@ async def end_war_time_job(bot: Bot):
             if war.status in [WarStatusEnum.FIGHTING, WarStatusEnum.GRACE_PERIOD]:
                 logger.info(f"Urush #{war.id} 23:00 da yakunlanmoqda (zaxira)")
                 try:
-                    await _run_war(war, bot, session)
+                    await _run_war_v2(war, bot, session)
                 except Exception as e:
                     logger.error(f"Urush #{war.id} yakunlashda xato: {e}")
+
+
+async def _run_war_v2(war, bot, session):
+    """
+    4-BOSQICH: Deployment tizimi bilan urush hisoblash.
+    - WarDeployment bor bo'lsa → faqat deployment resurslari jangga kiradi
+    - Deployment yubormagan tomon → auto_defend (barcha mavjud resursi bilan)
+    - Hujumchi deployment resurslari allaqachon balansdan ayirilgan (3-bosqich)
+    - Mudofaachi auto_defend bo'lsa → eski mantiq (balansdan ayiriladi)
+    """
+    from utils.battle import calculate_battle, AllyContribution
+    from utils.chronicle import post_to_chronicle, format_chronicle
+    from database.models import WarAllySupport
+    from database.repositories import WarDeploymentRepo, IronBankDepositRepo, CustomItemRepo
+    from sqlalchemy import select as sa_select
+    from sqlalchemy.orm import selectinload as sa_selectinload
+    from dataclasses import dataclass
+
+    war_repo       = WarRepo(session)
+    house_repo     = HouseRepo(session)
+    chronicle_repo = ChronicleRepo(session)
+    dep_repo_war   = WarDeploymentRepo(session)
+
+    attacker = war.attacker
+    defender = war.defender
+
+    # ── Deployment olish ──────────────────────────────────────────────
+    att_dep = await dep_repo_war.get_deployment(war.id, attacker.id)
+    def_dep = await dep_repo_war.get_deployment(war.id, defender.id)
+
+    # Deployment yubormagan tomon → auto_defend
+    if not def_dep:
+        await dep_repo_war.set_auto_defend(war.id, defender.id)
+        def_dep = await dep_repo_war.get_deployment(war.id, defender.id)
+    if not att_dep:
+        await dep_repo_war.set_auto_defend(war.id, attacker.id)
+        att_dep = await dep_repo_war.get_deployment(war.id, attacker.id)
+
+    att_auto = att_dep.is_auto_defend
+    def_auto = def_dep.is_auto_defend
+
+    # ── Omonatdagi resurslarni jangdan chiqarish ──────────────────────
+    bank_dep_repo = IronBankDepositRepo(session)
+    att_bank = await bank_dep_repo.get_active(attacker.id)
+    def_bank = await bank_dep_repo.get_active(defender.id)
+
+    # Auto-defend tomonlar uchun: omonatni chiqarib qo'yish
+    if att_auto:
+        att_soldiers  = attacker.total_soldiers  - (att_bank.soldiers  if att_bank else 0)
+        att_dragons   = attacker.total_dragons   - (att_bank.dragons   if att_bank else 0)
+        att_scorpions = attacker.total_scorpions - (att_bank.scorpions if att_bank else 0)
+        att_soldiers  = max(0, att_soldiers)
+        att_dragons   = max(0, att_dragons)
+        att_scorpions = max(0, att_scorpions)
+    else:
+        # Deployment bor — allaqachon balansdan ayirilgan, deployment qiymati ishlatiladi
+        att_soldiers  = att_dep.soldiers
+        att_dragons   = att_dep.dragons
+        att_scorpions = att_dep.scorpions
+
+    if def_auto:
+        def_soldiers  = max(0, defender.total_soldiers  - (def_bank.soldiers  if def_bank else 0))
+        def_dragons   = max(0, defender.total_dragons   - (def_bank.dragons   if def_bank else 0))
+        def_scorpions = max(0, defender.total_scorpions - (def_bank.scorpions if def_bank else 0))
+    else:
+        def_soldiers  = def_dep.soldiers
+        def_dragons   = def_dep.dragons
+        def_scorpions = def_dep.scorpions
+
+    # ── Ittifoqchi yordamlarini yuklash ──────────────────────────────
+    ally_result = await session.execute(
+        sa_select(WarAllySupport)
+        .where(WarAllySupport.war_id == war.id)
+        .options(sa_selectinload(WarAllySupport.ally_house))
+    )
+    ally_supports = ally_result.scalars().all()
+
+    attacker_allies = [
+        AllyContribution(
+            house_id=s.ally_house_id,
+            house_name=s.ally_house.name if s.ally_house else str(s.ally_house_id),
+            join_type=s.join_type,
+            soldiers=s.soldiers,
+            dragons=s.dragons,
+            scorpions=s.scorpions,
+        )
+        for s in ally_supports if s.side == "attacker"
+    ]
+    defender_allies = [
+        AllyContribution(
+            house_id=s.ally_house_id,
+            house_name=s.ally_house.name if s.ally_house else str(s.ally_house_id),
+            join_type=s.join_type,
+            soldiers=s.soldiers,
+            dragons=s.dragons,
+            scorpions=s.scorpions,
+        )
+        for s in ally_supports if s.side == "defender"
+    ]
+
+    # ── Battle uchun vaqtinchalik proxy xonadon obyektlari ───────────
+    # calculate_battle() house.total_soldiers/dragons/scorpions ni o'qiydi
+    # Deployment qiymatlarini to'g'ridan-to'g'ri o'rnatamiz
+    class _HouseProxy:
+        def __init__(self, real_house, soldiers, dragons, scorpions):
+            self._real = real_house
+            self.id               = real_house.id
+            self.name             = real_house.name
+            self.treasury         = real_house.treasury
+            self.total_soldiers   = soldiers
+            self.total_dragons    = dragons
+            self.total_scorpions  = scorpions
+            self.castle_defense   = getattr(real_house, 'castle_defense', 0)
+            self._custom_items    = []
+            # Boshqa atributlar kerak bo'lsa real_house dan olinadi
+        def __getattr__(self, item):
+            return getattr(self._real, item)
+
+    att_proxy = _HouseProxy(attacker, att_soldiers, att_dragons, att_scorpions)
+    def_proxy = _HouseProxy(defender, def_soldiers, def_dragons, def_scorpions)
+
+    # ── Custom itemlar ────────────────────────────────────────────────
+    custom_repo = CustomItemRepo(session)
+    att_ci_rows = await custom_repo.get_house_items_with_info(attacker.id)
+    def_ci_rows = await custom_repo.get_house_items_with_info(defender.id)
+
+    att_items_before = {row.item_id: row.quantity for row in att_ci_rows}
+    def_items_before = {row.item_id: row.quantity for row in def_ci_rows}
+
+    att_proxy._custom_items = [{"item": row.item, "qty": row.quantity} for row in att_ci_rows]
+    def_proxy._custom_items = [{"item": row.item, "qty": row.quantity} for row in def_ci_rows]
+
+    # ── Hisob-kitob ───────────────────────────────────────────────────
+    result = calculate_battle(
+        att_proxy, def_proxy,
+        defender_gold=defender.treasury,
+        attacker_allies=attacker_allies,
+        defender_allies=defender_allies,
+    )
+
+    # ── Jangda halok bo'lgan itemlar ──────────────────────────────────
+    from database.models import HouseCustomItem
+    from sqlalchemy import select as _sa_select
+
+    async def _apply_battle_item_losses_v2(house_id, custom_items_list, items_before):
+        items_after = {entry["item"].id: entry["qty"] for entry in custom_items_list}
+        for item_id, qty_before in items_before.items():
+            qty_after = items_after.get(item_id, 0)
+            lost = qty_before - qty_after
+            if lost <= 0:
+                continue
+            res = await session.execute(
+                _sa_select(HouseCustomItem).where(
+                    HouseCustomItem.house_id == house_id,
+                    HouseCustomItem.item_id == item_id,
+                )
+            )
+            row = res.scalar_one_or_none()
+            if row:
+                row.quantity = max(0, row.quantity - lost)
+
+    await _apply_battle_item_losses_v2(attacker.id, att_proxy._custom_items, att_items_before)
+    await _apply_battle_item_losses_v2(defender.id, def_proxy._custom_items, def_items_before)
+
+    # ── Lordlarga round xabarlari ─────────────────────────────────────
+    lord_ids = [lid for lid in [attacker.lord_id, defender.lord_id] if lid]
+
+    def _fmt_items(rows):
+        if not rows:
+            return ""
+        return " | " + " ".join(f"{r.item.emoji}{r.item.name}×{r.quantity}" for r in rows)
+
+    att_mode = "🛡️ Avtomatik" if att_auto else "🗡️ Deployment"
+    def_mode = "🛡️ Avtomatik" if def_auto else "🗡️ Deployment"
+
+    intro = (
+        f"⚔️ <b>JANG BOSHLANDI!</b>\n\n"
+        f"🔴 <b>{attacker.name}</b> [{att_mode}]: {att_soldiers} askar | "
+        f"{att_dragons} ajdar | {att_scorpions} skorpion"
+        f"{_fmt_items(att_ci_rows)}\n"
+        f"🔵 <b>{defender.name}</b> [{def_mode}]: {def_soldiers} askar | "
+        f"{def_dragons} ajdar | {def_scorpions} skorpion"
+        f"{_fmt_items(def_ci_rows)}"
+    )
+    if attacker_allies:
+        intro += "\n🤝 Hujumchi ittifoqchilari: " + ", ".join(a.house_name for a in attacker_allies)
+    if defender_allies:
+        intro += "\n🤝 Mudofaachi ittifoqchilari: " + ", ".join(a.house_name for a in defender_allies)
+
+    for lord_id in lord_ids:
+        try:
+            await bot.send_message(lord_id, intro, parse_mode="HTML")
+        except Exception:
+            pass
+
+    for rnd in result.round_results:
+        round_text = "\n".join(rnd.log).strip()
+        if not round_text:
+            continue
+        for lord_id in lord_ids:
+            try:
+                await bot.send_message(lord_id, round_text, parse_mode="HTML")
+            except Exception:
+                pass
+
+    # ── Resurs yo'qotmalari va o'lja ─────────────────────────────────
+    if result.attacker_wins:
+        # Hujumchi g'alaba — o'lja oladi
+        await house_repo.update_treasury(attacker.id, result.loot_gold)
+        await house_repo.update_treasury(defender.id, -min(result.loot_gold, defender.treasury))
+
+        if att_auto:
+            # Auto-defend hujumchi: yo'qotmalar balansdan ayiriladi
+            await house_repo.update_military(attacker.id,
+                soldiers=-result.attacker_soldiers_lost + result.loot_soldiers,
+                dragons=-result.attacker_dragons_lost  + result.loot_dragons,
+                scorpions=-result.attacker_scorpions_lost,
+            )
+        else:
+            # Deployment hujumchi: resurslar allaqachon ayirilgan → faqat o'lja QO'SHILADI
+            await house_repo.update_military(attacker.id,
+                soldiers=result.loot_soldiers,
+                dragons=result.loot_dragons,
+            )
+
+        if def_auto:
+            # Auto-defend mudofaachi: yo'qotmalar balansdan ayiriladi
+            await house_repo.update_military(defender.id,
+                soldiers=-result.defender_soldiers_lost - result.loot_soldiers,
+                dragons=-result.defender_dragons_lost  - result.loot_dragons,
+                scorpions=-result.defender_scorpions_lost,
+            )
+        else:
+            # Deployment mudofaachi: deployment resurslar allaqachon ayirilgan
+            # Faqat o'lja chiqarish (qolgan balansdan)
+            await house_repo.update_military(defender.id,
+                soldiers=-result.loot_soldiers,
+                dragons=-result.loot_dragons,
+            )
+
+        await _transfer_custom_item_loot(session, loser_id=defender.id, winner_id=attacker.id)
+        if attacker.is_under_occupation and attacker.occupier_house_id == defender.id:
+            await house_repo.clear_occupation(attacker.id)
+        await house_repo.set_occupation(defender.id, attacker.id, tax_rate=0.10)
+        await _handle_lord_succession(session, war, bot)
+    else:
+        # Mudofaachi g'alaba
+        await house_repo.update_treasury(defender.id, result.loot_gold)
+        await house_repo.update_treasury(attacker.id, -min(result.loot_gold, attacker.treasury))
+
+        if att_auto:
+            await house_repo.update_military(attacker.id,
+                soldiers=-result.attacker_soldiers_lost - result.loot_soldiers,
+                dragons=-result.attacker_dragons_lost  - result.loot_dragons,
+                scorpions=-result.attacker_scorpions_lost,
+            )
+        else:
+            # Deployment hujumchi yutqazdi — allaqachon ayirilgan, o'lja ham bor
+            await house_repo.update_military(attacker.id,
+                soldiers=-result.loot_soldiers,
+                dragons=-result.loot_dragons,
+            )
+
+        if def_auto:
+            await house_repo.update_military(defender.id,
+                soldiers=-result.defender_soldiers_lost + result.loot_soldiers,
+                dragons=-result.defender_dragons_lost  + result.loot_dragons,
+                scorpions=-result.defender_scorpions_lost,
+            )
+        else:
+            # Deployment mudofaachi yutdi — allaqachon ayirilgan → o'lja QO'SHILADI
+            await house_repo.update_military(defender.id,
+                soldiers=result.loot_soldiers,
+                dragons=result.loot_dragons,
+            )
+
+        await _transfer_custom_item_loot(session, loser_id=attacker.id, winner_id=defender.id)
+        if defender.is_under_occupation and defender.occupier_house_id == attacker.id:
+            await house_repo.clear_occupation(defender.id)
+        await house_repo.set_occupation(attacker.id, defender.id, tax_rate=0.10)
+
+    # ── Ittifoqchi yo'qotmalari ───────────────────────────────────────
+    for house_id, losses in result.attacker_ally_losses.items():
+        if losses["soldiers"] > 0 or losses["dragons"] > 0:
+            await house_repo.update_military(house_id,
+                soldiers=-losses["soldiers"],
+                dragons=-losses["dragons"],
+                scorpions=-losses.get("scorpions", 0),
+            )
+    for house_id, losses in result.defender_ally_losses.items():
+        if losses["soldiers"] > 0 or losses["dragons"] > 0:
+            await house_repo.update_military(house_id,
+                soldiers=-losses["soldiers"],
+                dragons=-losses["dragons"],
+                scorpions=-losses.get("scorpions", 0),
+            )
+
+    await war_repo.end_war(
+        war.id, result.winner_id, result.loot_gold,
+        attacker_soldiers_lost=result.attacker_soldiers_lost,
+        defender_soldiers_lost=result.defender_soldiers_lost,
+        attacker_dragons_lost=result.attacker_dragons_lost,
+        defender_dragons_lost=result.defender_dragons_lost,
+    )
+
+    # ── Yakuniy natija xabari ─────────────────────────────────────────
+    winner = attacker if result.winner_id == attacker.id else defender
+    loser  = defender if result.winner_id == attacker.id else attacker
+    final_text = format_chronicle(
+        "war_ended",
+        winner=winner.name, loser=loser.name,
+        loot=result.loot_gold,
+        loot_s=result.loot_soldiers,
+        loot_d=result.loot_dragons,
+        att_lost_s=result.attacker_soldiers_lost,
+        att_lost_d=result.attacker_dragons_lost,
+        def_lost_s=result.defender_soldiers_lost,
+        def_lost_d=result.defender_dragons_lost,
+    )
+    tg_id = await post_to_chronicle(bot, final_text)
+    await chronicle_repo.add("war_ended", final_text, house_id=winner.id, tg_msg_id=tg_id)
+
+    for lord_id in lord_ids:
+        try:
+            await bot.send_message(lord_id, final_text, parse_mode="HTML")
+        except Exception:
+            pass
+
+    # ── Omonat: g'olibga flag qo'yish ────────────────────────────────
+    bank_dep_repo2 = IronBankDepositRepo(session)
+    loser_deposit = await bank_dep_repo2.get_active(loser.id)
+    if loser_deposit:
+        await bank_dep_repo2.set_war_winner(loser_deposit.id, winner.id)
+
+        deposit_notice_loser = (
+            f"🏦 <b>Omonat foizingiz bo'linadi!</b>\n\n"
+            f"Urushda mag'lub bo'ldingiz — omonat foizingizning bir qismi "
+            f"<b>{winner.name}</b> xonadoniga o'tadi.\n"
+            f"Foiz bo'linishi har kuni soat 02:00 da amalga oshiriladi."
+        )
+        deposit_notice_winner = (
+            f"🏦 <b>Dushman omonatidan foiz olasiz!</b>\n\n"
+            f"<b>{loser.name}</b> xonadonining omonat foizi "
+            f"har kuni sizga o'tkaziladi."
+        )
+        if loser.lord_id:
+            try:
+                await bot.send_message(loser.lord_id, deposit_notice_loser, parse_mode="HTML")
+            except Exception:
+                pass
+        if winner.lord_id:
+            try:
+                await bot.send_message(winner.lord_id, deposit_notice_winner, parse_mode="HTML")
+            except Exception:
+                pass
 
 
 async def _handle_lord_succession(session, war, bot):
