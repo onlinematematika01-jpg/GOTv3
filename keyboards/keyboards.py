@@ -322,3 +322,52 @@ def deploy_confirm_keyboard(war_id: int) -> InlineKeyboardMarkup:
     builder.button(text="❌ Bekor qilish",  callback_data=f"deploy:cancel:{war_id}")
     builder.adjust(2)
     return builder.as_markup()
+
+
+# ─────────────────────────────────────────────────────────────────
+# 5-BOSQICH: ASIRGA OLISH KEYBOARDLARI
+# ─────────────────────────────────────────────────────────────────
+
+def capture_lord_keyboard(war_id: int, prisoner_user_id: int) -> InlineKeyboardMarkup:
+    """G'olibga asirga olish / rad etish tugmalari"""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🔗 Asirga Olish (100 askar sarflanadi)",
+        callback_data=f"prisoner:capture:{war_id}:{prisoner_user_id}"
+    )
+    builder.button(
+        text="❌ Yo'q",
+        callback_data="prisoner:skip"
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def prisoner_manage_keyboard(prisoner_id: int) -> InlineKeyboardMarkup:
+    """G'olib uchun asir boshqaruv tugmalari"""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="💰 Tovon puli belgilash",
+        callback_data=f"prisoner:ransom:{prisoner_id}"
+    )
+    builder.button(
+        text="🕊️ Ozod qilish",
+        callback_data=f"prisoner:free:{prisoner_id}"
+    )
+    builder.button(
+        text="💀 O'ldirish",
+        callback_data=f"prisoner:execute:{prisoner_id}"
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def pay_ransom_keyboard(prisoner_id: int) -> InlineKeyboardMarkup:
+    """Ittifoqchi uchun tovon to'lash tugmasi"""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="💰 Tovon To'lash",
+        callback_data=f"prisoner:pay_ransom:{prisoner_id}"
+    )
+    builder.adjust(1)
+    return builder.as_markup()
