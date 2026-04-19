@@ -294,3 +294,31 @@ def item_edit_keyboard(item_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📦 Stokni o'zgartir", callback_data=f"admin:item:edit:stock:{item_id}")],
         [InlineKeyboardButton(text="🔙 Orqaga", callback_data=f"admin:item:info:{item_id}")],
     ])
+
+
+# ─────────────────────────────────────────────────────────────────
+# 3-BOSQICH: RESURS YUBORISH (DEPLOYMENT) KEYBOARDLARI
+# ─────────────────────────────────────────────────────────────────
+
+def deploy_resources_keyboard(war_id: int) -> InlineKeyboardMarkup:
+    """Resurs yuborish tugmasi — urush e'lon qilinganda lordlarga yuboriladi"""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🗡️ Resurs Yuborish",
+        callback_data=f"deploy:start:{war_id}"
+    )
+    builder.button(
+        text="📊 Joriy Holat",
+        callback_data=f"deploy:status:{war_id}"
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def deploy_confirm_keyboard(war_id: int) -> InlineKeyboardMarkup:
+    """Deployment tasdiqlash / bekor qilish keyboard"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Tasdiqlash",    callback_data=f"deploy:confirm:{war_id}")
+    builder.button(text="❌ Bekor qilish",  callback_data=f"deploy:cancel:{war_id}")
+    builder.adjust(2)
+    return builder.as_markup()
