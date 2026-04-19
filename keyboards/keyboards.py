@@ -128,14 +128,18 @@ def surrender_or_fight_keyboard(war_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def war_selection_keyboard(wars: list, action: str) -> InlineKeyboardMarkup:
+def war_selection_keyboard(wars: list, action: str, house_id: int = 0) -> InlineKeyboardMarkup:
     """Bir nechta urush bo'lganda tanlash keyboard"""
     builder = InlineKeyboardBuilder()
     for war in wars:
-        other = war.defender if hasattr(war, 'attacker_house_id') and war.attacker_house_id != getattr(war, '_current_house_id', None) else war.attacker
-        other_name = other.name if other else f"Urush #{war.id}"
+        if war.attacker_house_id == house_id:
+            other_name = war.defender.name if war.defender else f"Urush #{war.id}"
+            role = "⚔️"
+        else:
+            other_name = war.attacker.name if war.attacker else f"Urush #{war.id}"
+            role = "🛡️"
         builder.button(
-            text=f"vs {other_name}",
+            text=f"{role} vs {other_name}",
             callback_data=f"war:{action}:{war.id}"
         )
     builder.adjust(1)
