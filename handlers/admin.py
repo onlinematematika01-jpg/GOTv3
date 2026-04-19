@@ -58,6 +58,10 @@ class AdminState(StatesGroup):
     item_edit_defense = State()
     item_edit_price = State()
     item_edit_stock = State()
+    # Ritsar sozlamalari
+    waiting_knight_max_soldiers = State()
+    waiting_knight_daily_farm = State()
+    waiting_knight_buy_limit = State()
 
 
 # ─── BANK LIMIT — runtime o'zgaruvchilar ───
@@ -2244,5 +2248,147 @@ async def admin_deposit_set_time(message: Message, state: FSMContext):
     await message.answer(
         f"✅ Foiz tushadigan vaqt: <b>{hour:02d}:{minute:02d}</b> (Toshkent) qilib belgilandi.\n"
         f"Scheduler qayta yuklandi!",
+        parse_mode="HTML"
+    )
+
+
+# ─── RITSAR SOZLAMALARI ──────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "admin:knight_settings")
+async def admin_knight_settings(callback: CallbackQuery):
+    from config.settings import settings as s
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗡️ Maks askar limitini o'zgartirish", callback_data="admin:knight:max_soldiers")],
+        [InlineKeyboardButton(text="🌾 Kunlik farm miqdorini o'zgartirish", callback_data="admin:knight:daily_farm")],
+        [InlineKeyboardButton(text="🛒 Bir marta xarid limitini o'zgartirish", callback_data="admin:knight:buy_limit")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:back")],
+    ])
+    await callback.answer()
+    await callback.message.edit_text(
+        f"⚔️ <b>RITSAR SOZLAMALARI</b>\n\n"
+        f"🗡️ Maks askar: <b>{s.KNIGHT_MAX_SOLDIERS}</b>\n"
+        f"🌾 Kunlik farm: <b>{s.KNIGHT_DAILY_FARM}</b> askar\n"
+        f"🛒 Xarid limiti: <b>{s.KNIGHT_SOLDIER_BUY_LIMIT}</b> ta\n\n"
+        f"O'zgartirmoqchi bo'lgan sozlamani tanlang:",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "admin:knight:max_soldiers")
+async def admin_knight_max_soldiers(callback: CallbackQuery, state: FSMContext):
+    from config.settings import settings as s
+    await state.set_state(AdminState.waiting_knight_max_soldiers)
+    await callback.answer()
+    await callback.message.answer(
+        f"🗡️ <b>Ritsarning maksimal askar soni</b>\n\n"
+        f"Hozirgi qiymat: <b>{s.KNIGHT_MAX_SOLDIERS}</b>\n\n"
+        f"Yangi qiymatni kiriting (butun son):",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_knight_max_soldiers)
+async def admin_knight_max_soldiers_input(message: Message, state: FSMContext):
+    try:
+        val = int(message.text.strip())
+        if val <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Musbat butun son kiriting.")
+        return
+
+    from database.engine import AsyncSessionFactory
+    from database.repositories import BotSettingsRepo
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        await cfg.set("knight_max_soldiers", str(val))
+
+    # Runtime o'zgartirish
+    from config.settings import settings as s
+    s.KNIGHT_MAX_SOLDIERS = val
+
+    await state.clear()
+    await message.answer(
+        f"✅ Ritsarning maks askar soni: <b>{val}</b> qilib belgilandi.",
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "admin:knight:daily_farm")
+async def admin_knight_daily_farm(callback: CallbackQuery, state: FSMContext):
+    from config.settings import settings as s
+    await state.set_state(AdminState.waiting_knight_daily_farm)
+    await callback.answer()
+    await callback.message.answer(
+        f"🌾 <b>Ritsarning kunlik farm miqdori</b>\n\n"
+        f"Hozirgi qiymat: <b>{s.KNIGHT_DAILY_FARM}</b> askar\n\n"
+        f"Yangi qiymatni kiriting (butun son):",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_knight_daily_farm)
+async def admin_knight_daily_farm_input(message: Message, state: FSMContext):
+    try:
+        val = int(message.text.strip())
+        if val <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Musbat butun son kiriting.")
+        return
+
+    from database.engine import AsyncSessionFactory
+    from database.repositories import BotSettingsRepo
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        await cfg.set("knight_daily_farm", str(val))
+
+    from config.settings import settings as s
+    s.KNIGHT_DAILY_FARM = val
+
+    await state.clear()
+    await message.answer(
+        f"✅ Ritsarning kunlik farm: <b>{val}</b> askar qilib belgilandi.",
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "admin:knight:buy_limit")
+async def admin_knight_buy_limit(callback: CallbackQuery, state: FSMContext):
+    from config.settings import settings as s
+    await state.set_state(AdminState.waiting_knight_buy_limit)
+    await callback.answer()
+    await callback.message.answer(
+        f"🛒 <b>Ritsarning bir marta xarid limiti</b>\n\n"
+        f"Hozirgi qiymat: <b>{s.KNIGHT_SOLDIER_BUY_LIMIT}</b> ta\n\n"
+        f"Yangi qiymatni kiriting (butun son):",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_knight_buy_limit)
+async def admin_knight_buy_limit_input(message: Message, state: FSMContext):
+    try:
+        val = int(message.text.strip())
+        if val <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Musbat butun son kiriting.")
+        return
+
+    from database.engine import AsyncSessionFactory
+    from database.repositories import BotSettingsRepo
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        await cfg.set("knight_soldier_buy_limit", str(val))
+
+    from config.settings import settings as s
+    s.KNIGHT_SOLDIER_BUY_LIMIT = val
+
+    await state.clear()
+    await message.answer(
+        f"✅ Ritsarning xarid limiti: <b>{val}</b> ta qilib belgilandi.",
         parse_mode="HTML"
     )
