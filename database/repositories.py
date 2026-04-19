@@ -1547,3 +1547,147 @@ class PrisonerRepo:
             .values(status=PrisonerStatusEnum.EXECUTED, freed_at=datetime.utcnow())
         )
         await self.session.commit()
+
+
+class KnightRepo:
+    def __init__(self, session):
+        self.session = session
+
+    async def get_profile(self, user_id: int):
+        from database.models import KnightProfile
+        from sqlalchemy import select
+        result = await self.session.execute(
+            select(KnightProfile).where(KnightProfile.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_house_knights(self, house_id: int):
+        from database.models import KnightProfile
+        from sqlalchemy import select
+        result = await self.session.execute(
+            select(KnightProfile).where(
+                KnightProfile.house_id == house_id,
+                KnightProfile.is_active == True
+            )
+        )
+        return result.scalars().all()
+
+    async def create_profile(self, user_id: int, house_id: int):
+        from database.models import KnightProfile
+        profile = KnightProfile(user_id=user_id, house_id=house_id)
+        self.session.add(profile)
+        await self.session.flush()
+        return profile
+
+    async def deactivate(self, user_id: int):
+        from database.models import KnightProfile
+        from sqlalchemy import update
+        await self.session.execute(
+            update(KnightProfile)
+            .where(KnightProfile.user_id == user_id)
+            .values(is_active=False)
+        )
+
+    async def add_soldiers(self, user_id: int, amount: int):
+        from database.models import KnightProfile
+        from sqlalchemy import update
+        await self.session.execute(
+            update(KnightProfile)
+            .where(KnightProfile.user_id == user_id)
+            .values(soldiers=KnightProfile.soldiers + amount)
+        )
+
+    async def remove_soldiers(self, user_id: int, amount: int):
+        from database.models import KnightProfile
+        from sqlalchemy import update
+        await self.session.execute(
+            update(KnightProfile)
+            .where(KnightProfile.user_id == user_id)
+            .values(soldiers=KnightProfile.soldiers - amount)
+        )
+
+    async def update_farm_date(self, user_id: int, dt):
+        from database.models import KnightProfile
+        from sqlalchemy import update
+        await self.session.execute(
+            update(KnightProfile)
+            .where(KnightProfile.user_id == user_id)
+            .values(last_farm_date=dt)
+        )
+
+    async def count_house_knights(self, house_id: int) -> int:
+        from database.models import KnightProfile
+        from sqlalchemy import select, func
+        result = await self.session.execute(
+            select(func.count()).where(
+                KnightProfile.house_id == house_id,
+                KnightProfile.is_active == True
+            )
+        )
+        return result.scalar() or 0
+
+
+class KnightOrderRepo:
+    def __init__(self, session):
+        self.session = session
+
+    async def create(self, war_id: int, house_id: int, knight_id: int, lord_id: int, soldiers: int):
+        from database.models import KnightOrder
+        order = KnightOrder(
+            war_id=war_id, house_id=house_id,
+            knight_id=knight_id, lord_id=lord_id,
+            soldiers=soldiers
+        )
+        self.session.add(order)
+        await self.session.flush()
+        return order
+
+    async def get_pending_for_knight(self, knight_id: int):
+        from database.models import KnightOrder, KnightOrderStatusEnum
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        result = await self.session.execute(
+            select(KnightOrder)
+            .where(
+                KnightOrder.knight_id == knight_id,
+                KnightOrder.status == KnightOrderStatusEnum.PENDING
+            )
+            .options(selectinload(KnightOrder.war), selectinload(KnightOrder.house))
+        )
+        return result.scalars().all()
+
+    async def get_by_id(self, order_id: int):
+        from database.models import KnightOrder
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        result = await self.session.execute(
+            select(KnightOrder)
+            .where(KnightOrder.id == order_id)
+            .options(
+                selectinload(KnightOrder.war),
+                selectinload(KnightOrder.knight),
+                selectinload(KnightOrder.house)
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def set_status(self, order_id: int, status):
+        from database.models import KnightOrder
+        from sqlalchemy import update
+        from datetime import datetime
+        await self.session.execute(
+            update(KnightOrder)
+            .where(KnightOrder.id == order_id)
+            .values(status=status, responded_at=datetime.utcnow())
+        )
+
+    async def get_house_orders_for_war(self, war_id: int, house_id: int):
+        from database.models import KnightOrder
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        result = await self.session.execute(
+            select(KnightOrder)
+            .where(KnightOrder.war_id == war_id, KnightOrder.house_id == house_id)
+            .options(selectinload(KnightOrder.knight))
+        )
+        return result.scalars().all()
