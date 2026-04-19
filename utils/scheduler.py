@@ -900,6 +900,25 @@ async def _run_war_v2(war, bot, session):
         except Exception:
             pass
 
+    # ── Asirga olish imkoni ───────────────────────────────────────────
+    from keyboards.keyboards import capture_lord_keyboard
+    winner_house = attacker if result.attacker_wins else defender
+    loser_house  = defender if result.attacker_wins else attacker
+
+    if winner_house.lord_id and loser_house.lord_id:
+        try:
+            await bot.send_message(
+                winner_house.lord_id,
+                f"⚔️ <b>Mag'lub lordni asirga olasizmi?</b>\n\n"
+                f"👤 {loser_house.name} lording\n"
+                f"💰 Narxi: 100 askar\n"
+                f"📦 Asir lordning barcha resurslari (omonatdan tashqari) sizga o'tadi.",
+                reply_markup=capture_lord_keyboard(war.id, loser_house.lord_id),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"Asirga olish tugmasi yuborishda xato: {e}")
+
     # ── Omonat: g'olibga flag qo'yish ────────────────────────────────
     bank_dep_repo2 = IronBankDepositRepo(session)
     loser_deposit = await bank_dep_repo2.get_active(loser.id)
