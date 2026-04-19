@@ -5,6 +5,7 @@ from .keyboards import (
     back_only_keyboard, with_back, back_button, rating_menu_keyboard,
     alliance_request_keyboard, alliance_group_menu_keyboard, alliance_invite_keyboard,
     deploy_resources_keyboard, deploy_confirm_keyboard,
+    capture_lord_keyboard, prisoner_manage_keyboard, pay_ransom_keyboard,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "back_only_keyboard", "with_back", "back_button", "rating_menu_keyboard",
     "alliance_request_keyboard", "alliance_group_menu_keyboard", "alliance_invite_keyboard",
     "deploy_resources_keyboard", "deploy_confirm_keyboard",
+    "capture_lord_keyboard", "prisoner_manage_keyboard", "pay_ransom_keyboard",
 ]
