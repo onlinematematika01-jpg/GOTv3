@@ -175,21 +175,24 @@ async def knight_appoint_confirm(callback: CallbackQuery):
 
         # Rolni o'zgartirish
         target.role = RoleEnum.KNIGHT
+        await session.flush()
 
-        # Profil yaratish yoki qayta faollashtirish
+        # Profil yaratish yoki qayta faollashtirish — to'g'ridan SQL bilan
+        from sqlalchemy import text
         if existing:
-            existing.is_active = True
-            existing.soldiers  = 0
-            existing.house_id  = lord.house_id
-        else:
-            from database.models import KnightProfile
-            profile = KnightProfile(
-                user_id=target_id,
-                house_id=lord.house_id,
-                soldiers=0,
-                is_active=True,
+            await session.execute(
+                text("""UPDATE knight_profiles
+                         SET is_active=true, soldiers=0, house_id=:hid
+                         WHERE user_id=:uid"""),
+                {"hid": lord.house_id, "uid": target_id}
             )
-            session.add(profile)
+        else:
+            await session.execute(
+                text("""INSERT INTO knight_profiles
+                         (user_id, house_id, soldiers, is_active, appointed_at)
+                         VALUES (:uid, :hid, 0, true, NOW())"""),
+                {"uid": target_id, "hid": lord.house_id}
+            )
 
         await session.commit()
 
