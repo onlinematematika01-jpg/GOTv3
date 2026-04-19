@@ -159,6 +159,8 @@ class War(Base):
     defender_dragons_lost = Column(Integer, default=0)
     loot_gold = Column(BigInteger, default=0)
     defender_surrendered = Column(Boolean, default=False)
+    executed_lord_flag   = Column(Boolean, default=False)
+    # True bo'lsa: g'olib asirni o'ldirgan → barcha xonadon bu lordga urush ocha oladi
 
     attacker = relationship("House", foreign_keys=[attacker_house_id])
     defender = relationship("House", foreign_keys=[defender_house_id])
@@ -404,6 +406,53 @@ class TournamentAnswer(Base):
     answered_at   = Column(DateTime, server_default=func.now())
 
     question = relationship("TournamentQuestion", back_populates="answers")
+
+
+class PrisonerStatusEnum(str, enum.Enum):
+    CAPTURED = "captured"
+    FREED    = "freed"
+    EXECUTED = "executed"
+
+
+class WarDeployment(Base):
+    """Xonadon jangga yuborgan resurslar (grace period davomida lord tanlaydi)"""
+    __tablename__ = "war_deployments"
+
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    war_id         = Column(Integer, ForeignKey("wars.id", ondelete="CASCADE"), nullable=False)
+    house_id       = Column(Integer, ForeignKey("houses.id"), nullable=False)
+    soldiers       = Column(Integer, default=0)
+    dragons        = Column(Integer, default=0)
+    scorpions      = Column(Integer, default=0)
+    is_auto_defend = Column(Boolean, default=False)
+    # is_auto_defend=True: mudofaachi resurs yubormadi,
+    # jang vaqtida mavjud resursi to'liq ishlatiladi
+    created_at     = Column(DateTime, server_default=func.now())
+    updated_at     = Column(DateTime, onupdate=func.now(), nullable=True)
+
+    war   = relationship("War",   foreign_keys=[war_id])
+    house = relationship("House", foreign_keys=[house_id])
+
+
+class Prisoner(Base):
+    """Asirga olingan lordlar"""
+    __tablename__ = "prisoners"
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    prisoner_user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
+    captor_house_id  = Column(Integer,    ForeignKey("houses.id"), nullable=False)
+    war_id           = Column(Integer,    ForeignKey("wars.id"), nullable=False)
+    ransom_amount    = Column(BigInteger, default=0)
+    status           = Column(
+        Enum(PrisonerStatusEnum, values_callable=lambda x: [e.value for e in x]),
+        default=PrisonerStatusEnum.CAPTURED
+    )
+    captured_at = Column(DateTime, server_default=func.now())
+    freed_at    = Column(DateTime, nullable=True)
+
+    prisoner_user = relationship("User",  foreign_keys=[prisoner_user_id])
+    captor_house  = relationship("House", foreign_keys=[captor_house_id])
+    war           = relationship("War",   foreign_keys=[war_id])
 
 
 class IronBankDeposit(Base):
