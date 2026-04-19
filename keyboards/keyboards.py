@@ -14,7 +14,7 @@ def main_menu_keyboard(role: RoleEnum) -> ReplyKeyboardMarkup:
     builder.row(KeyboardButton(text="⚔️ Urush"), KeyboardButton(text="🛒 Bozor"))
     builder.row(KeyboardButton(text="🏦 Temir Bank"), KeyboardButton(text="📜 Xronika"))
     builder.row(KeyboardButton(text="💬 Ichki Chat"), KeyboardButton(text="🤝 Diplomatiya"))
-    builder.row(KeyboardButton(text="🏆 Reyting"))
+    builder.row(KeyboardButton(text="🏆 Reyting"), KeyboardButton(text="📖 Qo'llanma"))
     if role in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
         builder.row(KeyboardButton(text="👑 Hukmdorlik Da'vosi"))
         builder.row(KeyboardButton(text="⚔️ Ritsar Saylash"))
@@ -370,4 +370,20 @@ def pay_ransom_keyboard(prisoner_id: int) -> InlineKeyboardMarkup:
         callback_data=f"prisoner:pay_ransom:{prisoner_id}"
     )
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def guide_keyboard(back: bool = False) -> InlineKeyboardMarkup:
+    """O'yin qo'llanmasi bo'limlari klaviaturasi"""
+    builder = InlineKeyboardBuilder()
+    if back:
+        builder.button(text="🔙 Orqaga", callback_data="guide:back")
+    else:
+        builder.button(text="⚔️ Urush", callback_data="guide:urush")
+        builder.button(text="🐉 Jang mexanikasi", callback_data="guide:jang")
+        builder.button(text="🤝 Diplomatiya", callback_data="guide:diplo")
+        builder.button(text="🛒 Bozor", callback_data="guide:bozor")
+        builder.button(text="⛓️ Asirlar", callback_data="guide:asir")
+        builder.button(text="👑 Rollar", callback_data="guide:rollar")
+        builder.adjust(2, 2, 2)
     return builder.as_markup()
