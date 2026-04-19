@@ -5,10 +5,10 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command
 from datetime import datetime, timedelta
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo, WarRepo, AllianceGroupRepo, ChronicleRepo
+from database.repositories import UserRepo, HouseRepo, WarRepo, AllianceGroupRepo, ChronicleRepo, WarDeploymentRepo
 from database.models import RoleEnum, WarStatusEnum, WarAllySupport
 from keyboards import war_menu_keyboard, house_list_keyboard, surrender_or_fight_keyboard
-from keyboards.keyboards import war_selection_keyboard
+from keyboards.keyboards import war_selection_keyboard, deploy_resources_keyboard, deploy_confirm_keyboard
 from utils.battle import calculate_battle, calculate_surrender_loot
 from utils.chronicle import post_to_chronicle, format_chronicle
 from config.settings import settings
@@ -22,7 +22,11 @@ logger = logging.getLogger(__name__)
 
 
 class WarState(StatesGroup):
-    selecting_target = State()
+    selecting_target  = State()  # mavjud
+    deploy_soldiers   = State()  # yangi — 3-bosqich
+    deploy_dragons    = State()  # yangi
+    deploy_scorpions  = State()  # yangi
+    deploy_confirm    = State()  # yangi
 
 
 async def get_war_sessions_from_db() -> list[dict]:
@@ -379,6 +383,33 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
                 )
             except Exception as e:
                 logger.warning(f"Mudofaachiga xabar yuborishda xato: {e}")
+
+        # Ikkala lordga ham resurs yuborish tugmasi
+        deploy_kb = deploy_resources_keyboard(war.id)
+        if attacker.lord_id:
+            try:
+                await bot.send_message(
+                    attacker.lord_id,
+                    f"🗡️ <b>Resurslaringizni jangga yuboring!</b>\n\n"
+                    f"⏰ Grace period: {settings.GRACE_PERIOD_MINUTES} daqiqa\n"
+                    f"Resurs yubormagan tomon barcha resursi bilan avtomatik mudofaaga o'tadi.",
+                    reply_markup=deploy_kb,
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.warning(f"Hujumchiga deploy xabari yuborishda xato: {e}")
+        if defender.lord_id:
+            try:
+                await bot.send_message(
+                    defender.lord_id,
+                    f"🛡️ <b>Mudofaa resurslaringizni yuboring!</b>\n\n"
+                    f"⏰ Grace period: {settings.GRACE_PERIOD_MINUTES} daqiqa\n"
+                    f"Resurs yubormagan tomon barcha resursi bilan avtomatik mudofaaga o'tadi.",
+                    reply_markup=deploy_resources_keyboard(war.id),
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.warning(f"Mudofaachiga deploy xabari yuborishda xato: {e}")
 
     # Ikkala tomon ittifoqchilariga xabar — session yopilgandan keyin
     from handlers.war_ally import notify_allies
@@ -791,3 +822,274 @@ async def request_betrayal(message: Message, state: FSMContext):
             f"Xiyonat xronikaga yozildi.",
             parse_mode="HTML"
         )
+
+
+# ─────────────────────────────────────────────────────────────────
+# 3-BOSQICH: RESURS YUBORISH (DEPLOYMENT) FSM HANDLERLARI
+# ─────────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("deploy:start:"))
+async def deploy_start(callback: CallbackQuery, state: FSMContext):
+    """Resurs yuborish FSM ni boshlash"""
+    war_id = int(callback.data.split(":")[2])
+
+    async with AsyncSessionFactory() as session:
+        user_repo  = UserRepo(session)
+        house_repo = HouseRepo(session)
+        dep_repo   = WarDeploymentRepo(session)
+        war_repo   = WarRepo(session)
+
+        user = await user_repo.get_by_id(callback.from_user.id)
+        if not user or user.role not in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
+            await callback.answer("❌ Faqat lord resurs yuboradi.", show_alert=True)
+            return
+
+        if not user.house_id:
+            await callback.answer("❌ Xonadoningiz yo'q.", show_alert=True)
+            return
+
+        # Urush hali faolmi?
+        war = await war_repo.get_by_id(war_id)
+        if not war or war.status not in [WarStatusEnum.DECLARED, WarStatusEnum.GRACE_PERIOD]:
+            await callback.answer("❌ Resurs yuborish muddati o'tdi yoki urush topilmadi.", show_alert=True)
+            return
+
+        # Faqat urush ishtirokchisi yuborishi mumkin
+        if user.house_id not in [war.attacker_house_id, war.defender_house_id]:
+            await callback.answer("❌ Siz bu urush ishtirokchisi emassiz.", show_alert=True)
+            return
+
+        house = await house_repo.get_by_id(user.house_id)
+
+        # Allaqachon deployment bor bo'lsa — ustiga qo'shish mumkinligini bildirish
+        existing = await dep_repo.get_deployment(war_id, user.house_id)
+        extra_text = ""
+        if existing and not existing.is_auto_defend:
+            extra_text = (
+                f"\n\n📦 <b>Oldingi yuborish:</b>\n"
+                f"🗡️ {existing.soldiers} askar | "
+                f"🐉 {existing.dragons} ajdar | "
+                f"🏹 {existing.scorpions} skorpion\n"
+                f"<i>Yangi miqdor ustiga qo'shiladi.</i>"
+            )
+
+        await state.update_data(
+            war_id=war_id,
+            max_soldiers=house.total_soldiers,
+            max_dragons=house.total_dragons,
+            max_scorpions=house.total_scorpions,
+            dep_soldiers=0,
+            dep_dragons=0,
+            dep_scorpions=0,
+        )
+        await state.set_state(WarState.deploy_soldiers)
+        await callback.answer()
+        await callback.message.answer(
+            f"🗡️ <b>Nechta askar yuborasiz?</b>\n"
+            f"Mavjud: <b>{house.total_soldiers}</b> askar\n"
+            f"(0 kiriting — askar yubormaslik){extra_text}",
+            parse_mode="HTML"
+        )
+
+
+@router.message(WarState.deploy_soldiers)
+async def deploy_soldiers_input(message: Message, state: FSMContext):
+    data = await state.get_data()
+    try:
+        qty = int(message.text.strip())
+        if qty < 0 or qty > data["max_soldiers"]:
+            raise ValueError
+    except (ValueError, TypeError):
+        await message.answer(
+            f"❌ 0 dan {data['max_soldiers']} gacha butun son kiriting."
+        )
+        return
+
+    await state.update_data(dep_soldiers=qty)
+    await state.set_state(WarState.deploy_dragons)
+    await message.answer(
+        f"🐉 <b>Nechta ajdar yuborasiz?</b>\n"
+        f"Mavjud: <b>{data['max_dragons']}</b> ajdar\n"
+        f"(0 kiriting — ajdar yubormaslik)",
+        parse_mode="HTML"
+    )
+
+
+@router.message(WarState.deploy_dragons)
+async def deploy_dragons_input(message: Message, state: FSMContext):
+    data = await state.get_data()
+    try:
+        qty = int(message.text.strip())
+        if qty < 0 or qty > data["max_dragons"]:
+            raise ValueError
+    except (ValueError, TypeError):
+        await message.answer(
+            f"❌ 0 dan {data['max_dragons']} gacha butun son kiriting."
+        )
+        return
+
+    await state.update_data(dep_dragons=qty)
+    await state.set_state(WarState.deploy_scorpions)
+    await message.answer(
+        f"🏹 <b>Nechta skorpion yuborasiz?</b>\n"
+        f"Mavjud: <b>{data['max_scorpions']}</b> skorpion\n"
+        f"(0 kiriting — skorpion yubormaslik)",
+        parse_mode="HTML"
+    )
+
+
+@router.message(WarState.deploy_scorpions)
+async def deploy_scorpions_input(message: Message, state: FSMContext):
+    data = await state.get_data()
+    try:
+        qty = int(message.text.strip())
+        if qty < 0 or qty > data["max_scorpions"]:
+            raise ValueError
+    except (ValueError, TypeError):
+        await message.answer(
+            f"❌ 0 dan {data['max_scorpions']} gacha butun son kiriting."
+        )
+        return
+
+    await state.update_data(dep_scorpions=qty)
+    data = await state.get_data()
+    await state.set_state(WarState.deploy_confirm)
+
+    total = data["dep_soldiers"] + data["dep_dragons"] + data["dep_scorpions"]
+    if total == 0:
+        warn = "\n\n⚠️ <i>Barcha 0 — resurs yubormaysiz. Tasdiqlasangiz, mavjud barcha resurs bilan avtomatik mudofaaga o'tasiz.</i>"
+    else:
+        warn = "\n\n⚠️ Tasdiqlangach resurslar darhol xonadon hisobidan ayiriladi!"
+
+    await message.answer(
+        f"📋 <b>Tasdiqlash:</b>\n\n"
+        f"🗡️ Askar: {data['dep_soldiers']}\n"
+        f"🐉 Ajdar: {data['dep_dragons']}\n"
+        f"🏹 Skorpion: {data['dep_scorpions']}"
+        f"{warn}",
+        reply_markup=deploy_confirm_keyboard(data["war_id"]),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(WarState.deploy_confirm, F.data.startswith("deploy:confirm:"))
+async def deploy_confirm_handler(callback: CallbackQuery, state: FSMContext):
+    data      = await state.get_data()
+    war_id    = data["war_id"]
+    soldiers  = data["dep_soldiers"]
+    dragons   = data["dep_dragons"]
+    scorpions = data["dep_scorpions"]
+
+    async with AsyncSessionFactory() as session:
+        user_repo  = UserRepo(session)
+        house_repo = HouseRepo(session)
+        dep_repo   = WarDeploymentRepo(session)
+        war_repo   = WarRepo(session)
+
+        user  = await user_repo.get_by_id(callback.from_user.id)
+        house = await house_repo.get_by_id(user.house_id)
+
+        # Resurs yetarlimi?
+        if (soldiers  > house.total_soldiers or
+            dragons   > house.total_dragons  or
+            scorpions > house.total_scorpions):
+            await callback.answer("❌ Yetarli resurs yo'q (boshqa urushga yuborilgan bo'lishi mumkin).", show_alert=True)
+            await state.clear()
+            return
+
+        if soldiers == 0 and dragons == 0 and scorpions == 0:
+            # Auto-defend — resurs ayirilmaydi, faqat belgi qo'yiladi
+            await dep_repo.set_auto_defend(war_id, user.house_id)
+            await state.clear()
+            await callback.answer()
+            await callback.message.answer(
+                "🛡️ <b>Avtomatik mudofaa belgilandi!</b>\n"
+                "Jang paytida mavjud barcha resurslaringiz ishlatiladi.",
+                parse_mode="HTML"
+            )
+            return
+
+        # Xonadon balansidan ayirish
+        await house_repo.update_military(
+            user.house_id,
+            soldiers=-soldiers,
+            dragons=-dragons,
+            scorpions=-scorpions
+        )
+
+        # Deployment yozish — ustiga qo'shish
+        existing = await dep_repo.get_deployment(war_id, user.house_id)
+        if existing and not existing.is_auto_defend:
+            await dep_repo.upsert(
+                war_id, user.house_id,
+                existing.soldiers  + soldiers,
+                existing.dragons   + dragons,
+                existing.scorpions + scorpions
+            )
+        else:
+            await dep_repo.upsert(war_id, user.house_id, soldiers, dragons, scorpions)
+
+        # Raqibga xabar (miqdor ko'rsatilmaydi — strategiya saqlanadi)
+        war = await war_repo.get_by_id(war_id)
+        enemy_house_id = (
+            war.defender_house_id
+            if war.attacker_house_id == user.house_id
+            else war.attacker_house_id
+        )
+        enemy_house = await house_repo.get_by_id(enemy_house_id)
+        if enemy_house and enemy_house.lord_id:
+            try:
+                await callback.bot.send_message(
+                    enemy_house.lord_id,
+                    "⚔️ Dushman resurslarini jangga yubordi!"
+                )
+            except Exception:
+                pass
+
+    await state.clear()
+    await callback.answer()
+    await callback.message.answer(
+        f"✅ <b>Resurslar yuborildi!</b>\n\n"
+        f"🗡️ {soldiers} askar | 🐉 {dragons} ajdar | 🏹 {scorpions} skorpion\n\n"
+        f"Jang natijasini kuting.",
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("deploy:cancel:"))
+async def deploy_cancel_handler(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.answer()
+    await callback.message.answer("❌ Resurs yuborish bekor qilindi.")
+
+
+@router.callback_query(F.data.startswith("deploy:status:"))
+async def deploy_status_handler(callback: CallbackQuery):
+    war_id = int(callback.data.split(":")[2])
+
+    async with AsyncSessionFactory() as session:
+        user_repo  = UserRepo(session)
+        dep_repo   = WarDeploymentRepo(session)
+        user = await user_repo.get_by_id(callback.from_user.id)
+
+        if not user or not user.house_id:
+            await callback.answer("❌ Xonadon topilmadi.", show_alert=True)
+            return
+
+        dep = await dep_repo.get_deployment(war_id, user.house_id)
+        if not dep:
+            await callback.answer("Hali resurs yubormagansiz.", show_alert=True)
+            return
+
+        if dep.is_auto_defend:
+            text = "🛡️ <b>Avtomatik mudofaa</b> — jangda barcha resurslaringiz ishlatiladi."
+        else:
+            text = (
+                f"📦 <b>Yuborilgan resurslar:</b>\n\n"
+                f"🗡️ Askar: {dep.soldiers}\n"
+                f"🐉 Ajdar: {dep.dragons}\n"
+                f"🏹 Skorpion: {dep.scorpions}"
+            )
+
+    await callback.answer()
+    await callback.message.answer(text, parse_mode="HTML")
