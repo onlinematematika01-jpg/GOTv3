@@ -102,9 +102,10 @@ async def capture_lord(callback: CallbackQuery):
         prisoner = await prisoner_repo.create(prisoner_user_id, captor_house.id, war_id)
 
         # Chronicle
-        text = (
-            f"🔗 <b>{captor_house.name} xonadoni {prisoner_user.full_name} lordini asirga oldi!</b>\n"
-            f"Resurslar g'olibga o'tkazildi."
+        text = format_chronicle(
+            "lord_captured",
+            captor=captor_house.name,
+            prisoner=prisoner_user.full_name,
         )
         tg_id = await post_to_chronicle(callback.bot, text)
         await chronicle_repo.add("lord_captured", text,
@@ -302,9 +303,11 @@ async def pay_ransom(callback: CallbackQuery):
         captor_house = await house_repo.get_by_id(prisoner.captor_house_id)
 
         # Chronicle
-        text = (
-            f"🕊️ <b>{prisoner.prisoner_user.full_name} lord asirlikdan ozod bo'ldi!</b>\n"
-            f"Tovon: {prisoner.ransom_amount:,} tanga"
+        text = format_chronicle(
+            "lord_ransomed",
+            payer=payer_house.name,
+            prisoner=prisoner.prisoner_user.full_name,
+            amount=prisoner.ransom_amount,
         )
         tg_id = await post_to_chronicle(callback.bot, text)
         await chronicle_repo.add("lord_freed", text,
@@ -371,7 +374,10 @@ async def free_prisoner(callback: CallbackQuery):
 
         await prisoner_repo.free(prisoner_id)
 
-        text = f"🕊️ <b>{prisoner.prisoner_user.full_name} lord asirlikdan ozod bo'ldi!</b>"
+        text = format_chronicle(
+            "lord_freed",
+            prisoner=prisoner.prisoner_user.full_name,
+        )
         tg_id = await post_to_chronicle(callback.bot, text)
         await chronicle_repo.add("lord_freed", text,
                                   user_id=prisoner.prisoner_user_id,
@@ -457,9 +463,10 @@ async def execute_prisoner_handler(callback: CallbackQuery):
         await prisoner_repo.execute_prisoner(prisoner_id)
 
         # Chronicle
-        text = (
-            f"💀 <b>{captor_house.name} xonadoni {prisoner.prisoner_user.full_name} lordini o'ldirdi!</b>\n\n"
-            f"⚠️ OGOHLANTIRISH: Bu lordga qarshi endi barcha xonadon urush e'lon qilishi mumkin!"
+        text = format_chronicle(
+            "lord_executed",
+            captor=captor_house.name,
+            prisoner=prisoner.prisoner_user.full_name,
         )
         tg_id = await post_to_chronicle(callback.bot, text)
         await chronicle_repo.add("lord_executed", text,
