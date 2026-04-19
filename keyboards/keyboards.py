@@ -39,7 +39,7 @@ def rating_menu_keyboard() -> InlineKeyboardMarkup:
 
 def war_menu_keyboard(is_lord: bool, has_active_war: bool) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    if is_lord and not has_active_war:
+    if is_lord:
         builder.button(text="⚔️ Urush E'lon Qilish", callback_data="war:declare")
     if has_active_war:
         builder.button(text="🏳️ Taslim Bo'lish", callback_data="war:surrender")
@@ -124,6 +124,20 @@ def surrender_or_fight_keyboard(war_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🏳️ Taslim Bo'lish (50% resurs berish)", callback_data=f"war:do_surrender:{war_id}")
     builder.button(text="⚔️ Jangga Kirish!", callback_data=f"war:do_fight:{war_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def war_selection_keyboard(wars: list, action: str) -> InlineKeyboardMarkup:
+    """Bir nechta urush bo'lganda tanlash keyboard"""
+    builder = InlineKeyboardBuilder()
+    for war in wars:
+        other = war.defender if hasattr(war, 'attacker_house_id') and war.attacker_house_id != getattr(war, '_current_house_id', None) else war.attacker
+        other_name = other.name if other else f"Urush #{war.id}"
+        builder.button(
+            text=f"vs {other_name}",
+            callback_data=f"war:{action}:{war.id}"
+        )
     builder.adjust(1)
     return builder.as_markup()
 
