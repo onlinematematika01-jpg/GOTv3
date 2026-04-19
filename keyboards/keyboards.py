@@ -17,7 +17,10 @@ def main_menu_keyboard(role: RoleEnum) -> ReplyKeyboardMarkup:
     builder.row(KeyboardButton(text="🏆 Reyting"), KeyboardButton(text="📖 Qo'llanma"))
     if role in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
         builder.row(KeyboardButton(text="👑 Hukmdorlik Da'vosi"))
-        builder.row(KeyboardButton(text="⚔️ Ritsar Saylash"))
+        builder.row(KeyboardButton(text="⚔️ Ritsar Saylash"), KeyboardButton(text="⚔️ Ritsarlarni Boshqarish"))
+    if role == RoleEnum.KNIGHT:
+        builder.row(KeyboardButton(text="⚔️ Ritsar Profili"), KeyboardButton(text="🌾 Ritsar Farm"))
+        builder.row(KeyboardButton(text="🛒 Ritsar Bozori"))
     if role in [RoleEnum.ADMIN]:
         builder.row(KeyboardButton(text="🔧 Admin Panel"))
     return builder.as_markup(resize_keyboard=True)
