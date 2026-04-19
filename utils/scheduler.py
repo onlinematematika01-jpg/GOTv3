@@ -502,10 +502,17 @@ async def _run_war(war, bot, session):
                 pass
 
 
+# 10 daqiqa eslatma — takroriy yuborishdan saqlash uchun (modul darajasida)
+_deploy_reminder_sent: set = set()
+
+DEPLOY_REMINDER_THRESHOLD = 10 * 60  # 600 soniya
+
+
 async def check_grace_period_job(bot: Bot):
     """Grace Period tugagan urushlarni darhol hisoblash va natijalarni e'lon qilish"""
+    from database.repositories import WarDeploymentRepo, HouseRepo
     async with AsyncSessionFactory() as session:
-        war_repo = WarRepo(session)
+        war_repo  = WarRepo(session)
         active_wars = await war_repo.get_all_active()
         now = datetime.utcnow()
 
@@ -517,6 +524,35 @@ async def check_grace_period_job(bot: Bot):
                     await _run_war(war, bot, session)
                 except Exception as e:
                     logger.error(f"Urush #{war.id} hisoblashda xato: {e}")
+
+            # 10 daqiqa eslatma — deployment yubormagan lordlarga
+            elif (war.status == WarStatusEnum.GRACE_PERIOD
+                  and war.grace_ends_at):
+                remaining = (war.grace_ends_at - now).total_seconds()
+                if 0 < remaining <= DEPLOY_REMINDER_THRESHOLD:
+                    dep_repo   = WarDeploymentRepo(session)
+                    house_repo = HouseRepo(session)
+                    for house_id in [war.attacker_house_id, war.defender_house_id]:
+                        reminder_key = f"{war.id}:{house_id}"
+                        if reminder_key in _deploy_reminder_sent:
+                            continue
+                        dep = await dep_repo.get_deployment(war.id, house_id)
+                        if not dep:
+                            house = await house_repo.get_by_id(house_id)
+                            if house and house.lord_id:
+                                try:
+                                    from keyboards.keyboards import deploy_resources_keyboard
+                                    await bot.send_message(
+                                        house.lord_id,
+                                        f"⚠️ <b>Grace period tugashiga {int(remaining // 60)} daqiqa qoldi!</b>\n\n"
+                                        f"Hali resurs yubormadingiz — tez qaror qiling!\n"
+                                        f"Resurs yubormagan tomon barcha resursi bilan avtomatik mudofaaga o'tadi.",
+                                        reply_markup=deploy_resources_keyboard(war.id),
+                                        parse_mode="HTML"
+                                    )
+                                    _deploy_reminder_sent.add(reminder_key)
+                                except Exception as e:
+                                    logger.warning(f"Deploy eslatma yuborishda xato (war={war.id}, house={house_id}): {e}")
 
 
 async def end_war_time_job(bot: Bot):
