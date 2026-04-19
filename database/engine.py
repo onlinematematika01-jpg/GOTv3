@@ -57,6 +57,7 @@ async def create_tables():
     await _seed_market_prices()
     await _seed_houses()
     await _migrate_create_alliance_group_tables()
+    await _migrate_create_new_war_tables()
 
 
 async def _migrate_create_enums():
@@ -255,3 +256,56 @@ async def _migrate_create_alliance_group_tables():
             )
         """))
     logger.info("Migration: ittifoq guruhi jadvallari tayyor")
+
+
+async def _migrate_create_new_war_tables():
+    """WarDeployment va Prisoner jadvallarini yaratish (agar mavjud bo'lmasa)"""
+
+    # 1. prisonerstatusenum yaratish (xavfsiz — mavjud bo'lsa o'tkazib yuboradi)
+    async with engine.begin() as conn:
+        try:
+            await conn.execute(text(
+                "CREATE TYPE prisonerstatusenum AS ENUM ('captured', 'freed', 'executed')"
+            ))
+            logger.info("Migration: prisonerstatusenum type yaratildi")
+        except Exception:
+            logger.info("Migration: prisonerstatusenum allaqachon mavjud")
+
+    # 2. war_deployments jadvali
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS war_deployments (
+                id SERIAL PRIMARY KEY,
+                war_id INTEGER NOT NULL REFERENCES wars(id) ON DELETE CASCADE,
+                house_id INTEGER NOT NULL REFERENCES houses(id),
+                soldiers INTEGER DEFAULT 0,
+                dragons INTEGER DEFAULT 0,
+                scorpions INTEGER DEFAULT 0,
+                is_auto_defend BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP
+            )
+        """))
+
+    # 3. prisoners jadvali
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS prisoners (
+                id SERIAL PRIMARY KEY,
+                prisoner_user_id BIGINT NOT NULL REFERENCES users(id),
+                captor_house_id INTEGER NOT NULL REFERENCES houses(id),
+                war_id INTEGER NOT NULL REFERENCES wars(id),
+                ransom_amount BIGINT DEFAULT 0,
+                status prisonerstatusenum DEFAULT 'captured',
+                captured_at TIMESTAMP DEFAULT NOW(),
+                freed_at TIMESTAMP
+            )
+        """))
+
+    # 4. wars jadvaliga executed_lord_flag ustuni qo'shish
+    await _migrate_add_column(
+        "wars", "executed_lord_flag",
+        "ALTER TABLE wars ADD COLUMN executed_lord_flag BOOLEAN DEFAULT FALSE"
+    )
+
+    logger.info("Migration: war_deployments, prisoners jadvallari va executed_lord_flag tayyor")
