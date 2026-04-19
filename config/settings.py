@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     SURRENDER_LOOT_PERCENT: float = 0.50
     MAX_HOUSE_MEMBERS: int = 10
 
+    # Ritsar
+    KNIGHT_MAX_SOLDIERS: int = 100      # Ritsarning maksimal shaxsiy askari
+    KNIGHT_DAILY_FARM: int = 10          # Ritsarning kunlik farm
+    KNIGHT_SOLDIER_BUY_LIMIT: int = 50   # Bir marta xarid limiti
+
     # Iron Bank
     DEFAULT_INTEREST_RATE: float = 0.10
 
