@@ -15,6 +15,8 @@ from handlers.subscription import router as subscription_router
 from handlers.tournament import router as tournament_router
 from handlers.prisoner import router as prisoner_router
 from handlers.guide import router as guide_router
+from handlers.knight import router as knight_router
+from handlers.knight_market import router as knight_market_router
 
 
 def register_all_handlers(dp: Dispatcher):
@@ -35,3 +37,5 @@ def register_all_handlers(dp: Dispatcher):
     dp.include_router(tournament_router)
     dp.include_router(prisoner_router)
     dp.include_router(guide_router)
+    dp.include_router(knight_router)
+    dp.include_router(knight_market_router)
