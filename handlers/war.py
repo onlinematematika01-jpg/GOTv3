@@ -8,6 +8,7 @@ from database.engine import AsyncSessionFactory
 from database.repositories import UserRepo, HouseRepo, WarRepo, AllianceGroupRepo, ChronicleRepo
 from database.models import RoleEnum, WarStatusEnum, WarAllySupport
 from keyboards import war_menu_keyboard, house_list_keyboard, surrender_or_fight_keyboard
+from keyboards.keyboards import war_selection_keyboard
 from utils.battle import calculate_battle, calculate_surrender_loot
 from utils.chronicle import post_to_chronicle, format_chronicle
 from config.settings import settings
@@ -152,9 +153,9 @@ async def war_menu(message: Message):
             return
 
         is_lord = user.role in [RoleEnum.LORD, RoleEnum.HIGH_LORD, RoleEnum.ADMIN]
-        active_war = None
+        active_wars = []
         if user.house_id:
-            active_war = await war_repo.get_active_war(user.house_id)
+            active_wars = await war_repo.get_active_wars(user.house_id)
 
         war_time_ok = await is_war_time_async()
         war_time_text = "✅ Urush vaqti" if war_time_ok else "❌ Urush vaqti emas"
@@ -172,21 +173,21 @@ async def war_menu(message: Message):
             f"📅 Urush seanslari: {sessions_text}\n\n"
         )
 
-        if active_war:
-            other = active_war.defender if active_war.attacker_house_id == user.house_id else active_war.attacker
-            text += (
-                f"🔥 <b>Faol urush:</b> {other.name}\n"
-                f"📊 Holat: {active_war.status.value}\n"
-            )
-            if active_war.grace_ends_at:
-                remaining = active_war.grace_ends_at - datetime.utcnow()
-                if remaining.total_seconds() > 0:
-                    mins = int(remaining.total_seconds() // 60)
-                    text += f"⏳ Grace Period qoldi: {mins} daqiqa\n"
+        if active_wars:
+            text += f"🔥 <b>Faol urushlar ({len(active_wars)}):</b>\n"
+            for aw in active_wars:
+                other = aw.defender if aw.attacker_house_id == user.house_id else aw.attacker
+                role_emoji = "⚔️" if aw.attacker_house_id == user.house_id else "🛡️"
+                text += f"{role_emoji} <b>{other.name}</b> — {aw.status.value}\n"
+                if aw.grace_ends_at:
+                    remaining = aw.grace_ends_at - datetime.utcnow()
+                    if remaining.total_seconds() > 0:
+                        mins = int(remaining.total_seconds() // 60)
+                        text += f"   ⏳ Grace: {mins} daqiqa qoldi\n"
 
         await message.answer(
             text,
-            reply_markup=war_menu_keyboard(is_lord, bool(active_war)),
+            reply_markup=war_menu_keyboard(is_lord, bool(active_wars)),
             parse_mode="HTML"
         )
 
@@ -212,14 +213,16 @@ async def declare_war_start(callback: CallbackQuery, state: FSMContext):
             await callback.answer("❌ Xonadoningiz yo'q.", show_alert=True)
             return
 
-        active_war = await war_repo.get_active_war(user.house_id)
-        if active_war:
-            await callback.answer("❌ Allaqachon faol urush mavjud.", show_alert=True)
-            return
-
         attacker_house = await house_repo.get_by_id(user.house_id)
         if not attacker_house:
             await callback.answer("❌ Xonadoningiz topilmadi.", show_alert=True)
+            return
+
+        # Resurs tekshiruvi — kamida bitta resurs bo'lsin
+        if (attacker_house.total_soldiers == 0 and
+                attacker_house.total_dragons == 0 and
+                attacker_house.total_scorpions == 0):
+            await callback.answer("❌ Urush ochish uchun resurslaringiz yo'q.", show_alert=True)
             return
 
         # High Lord — barcha hududlarga urush ochishi mumkin
@@ -604,26 +607,33 @@ async def war_surrender_button(callback: CallbackQuery):
             await callback.answer("❌ Faqat Lord qaror qabul qila oladi.", show_alert=True)
             return
 
-        active_war = await war_repo.get_active_war(user.house_id)
-        if not active_war:
-            await callback.answer("❌ Faol urush yo'q.", show_alert=True)
+        active_wars = await war_repo.get_active_wars(user.house_id)
+        # Faqat mudofaachi sifatidagi urushlarni filtrlash
+        defender_wars = [w for w in active_wars if w.defender_house_id == user.house_id]
+
+        if not defender_wars:
+            await callback.answer("❌ Taslim bo'lish uchun faol urush yo'q.", show_alert=True)
             return
 
-        if active_war.defender_house_id != user.house_id:
-            await callback.answer(
-                "❌ Faqat mudofaachi taslim bo'la oladi.", show_alert=True
+        if len(defender_wars) == 1:
+            active_war = defender_wars[0]
+            await callback.answer()
+            await callback.message.answer(
+                "⚠️ <b>Taslim bo'lishni tasdiqlaysizmi?</b>\n\n"
+                "Taslim bo'lsangiz resurslaringizning bir qismi yo'qoladi "
+                "va 10% doimiy soliq belgilanadi.\n\n"
+                "Tasdiqlash uchun quyidagi tugmani bosing:",
+                reply_markup=surrender_or_fight_keyboard(active_war.id),
+                parse_mode="HTML"
             )
-            return
-
-        await callback.answer()
-        await callback.message.answer(
-            "⚠️ <b>Taslim bo'lishni tasdiqlaysizmi?</b>\n\n"
-            "Taslim bo'lsangiz resurslaringizning bir qismi yo'qoladi "
-            "va 10% doimiy soliq belgilanadi.\n\n"
-            "Tasdiqlash uchun quyidagi tugmani bosing:",
-            reply_markup=surrender_or_fight_keyboard(active_war.id),
-            parse_mode="HTML"
-        )
+        else:
+            # Bir nechta urush — tanlash
+            await callback.answer()
+            await callback.message.answer(
+                "⚠️ Qaysi urushda taslim bo'lmoqchisiz?",
+                reply_markup=war_selection_keyboard(defender_wars, "do_surrender"),
+                parse_mode="HTML"
+            )
 
 
 @router.callback_query(F.data == "war:fight")
@@ -638,33 +648,42 @@ async def war_fight_button(callback: CallbackQuery):
             await callback.answer("❌ Xonadoningiz yo'q.", show_alert=True)
             return
 
-        active_war = await war_repo.get_active_war(user.house_id)
-        if not active_war:
+        active_wars = await war_repo.get_active_wars(user.house_id)
+        if not active_wars:
             await callback.answer("❌ Faol urush yo'q.", show_alert=True)
             return
 
-        # DB dan urush tugash vaqtini olish
         _sessions = await get_war_sessions_from_db()
         _war_ends = " / ".join(f"{s['end']:02d}:00" for s in _sessions) if _sessions else f"{settings.WAR_END_HOUR:02d}:00"
 
-        if (
-            active_war.defender_house_id == user.house_id
-            and user.role in [RoleEnum.LORD, RoleEnum.HIGH_LORD, RoleEnum.ADMIN]
-        ):
-            await callback.answer()
-            await callback.message.answer(
-                "⚔️ <b>Jangga kirishni tasdiqlaysizmi?</b>\n\n"
-                f"Urush {_war_ends} gacha davom etadi va natijalar avtomatik hisoblanadi.\n"
-                "Taslim bo'lish yoki jangda davom etish — qaror sizniki:",
-                reply_markup=surrender_or_fight_keyboard(active_war.id),
-                parse_mode="HTML"
-            )
+        if len(active_wars) == 1:
+            active_war = active_wars[0]
+            if (
+                active_war.defender_house_id == user.house_id
+                and user.role in [RoleEnum.LORD, RoleEnum.HIGH_LORD, RoleEnum.ADMIN]
+            ):
+                await callback.answer()
+                await callback.message.answer(
+                    "⚔️ <b>Jangga kirishni tasdiqlaysizmi?</b>\n\n"
+                    f"Urush {_war_ends} gacha davom etadi va natijalar avtomatik hisoblanadi.\n"
+                    "Taslim bo'lish yoki jangda davom etish — qaror sizniki:",
+                    reply_markup=surrender_or_fight_keyboard(active_war.id),
+                    parse_mode="HTML"
+                )
+            else:
+                await callback.answer()
+                await callback.message.answer(
+                    "⚔️ <b>Jang davom etmoqda!</b>\n\n"
+                    f"Urush {_war_ends} gacha davom etadi va natijalar avtomatik hisoblanadi.\n"
+                    "Qo'shinlaringizni tayyorlang! 🗡️🐉",
+                    parse_mode="HTML"
+                )
         else:
+            # Bir nechta urush — tanlash
             await callback.answer()
             await callback.message.answer(
-                "⚔️ <b>Jang davom etmoqda!</b>\n\n"
-                f"Urush {_war_ends} gacha davom etadi va natijalar avtomatik hisoblanadi.\n"
-                "Qo'shinlaringizni tayyorlang! 🗡️🐉",
+                "⚔️ Qaysi urush holatini ko'rmoqchisiz?",
+                reply_markup=war_selection_keyboard(active_wars, "do_fight"),
                 parse_mode="HTML"
             )
 
@@ -680,27 +699,26 @@ async def war_status(callback: CallbackQuery):
             await callback.answer("❌ Xonadoningiz yo'q.", show_alert=True)
             return
 
-        war = await war_repo.get_active_war(user.house_id)
-        if not war:
+        wars = await war_repo.get_active_wars(user.house_id)
+        if not wars:
             await callback.answer("✅ Hozirda faol urush yo'q.", show_alert=True)
             return
 
-        is_attacker = war.attacker_house_id == user.house_id
-        enemy = war.defender if is_attacker else war.attacker
-        role_text = "Hujumchi ⚔️" if is_attacker else "Mudofaachi 🛡️"
-
-        text = (
-            f"📊 <b>URUSH HOLATI</b>\n\n"
-            f"Sizning rolingiz: {role_text}\n"
-            f"Raqib: <b>{enemy.name}</b>\n"
-            f"Holat: {war.status.value}\n"
-        )
-
-        if war.grace_ends_at:
-            remaining = war.grace_ends_at - datetime.utcnow()
-            if remaining.total_seconds() > 0:
-                mins = int(remaining.total_seconds() // 60)
-                text += f"⏳ Grace Period: {mins} daqiqa qoldi\n"
+        text = "📊 <b>URUSH HOLATI</b>\n\n"
+        for war in wars:
+            is_attacker = war.attacker_house_id == user.house_id
+            enemy = war.defender if is_attacker else war.attacker
+            role_text = "Hujumchi ⚔️" if is_attacker else "Mudofaachi 🛡️"
+            text += (
+                f"{role_text} — <b>{enemy.name}</b>\n"
+                f"Holat: {war.status.value}\n"
+            )
+            if war.grace_ends_at:
+                remaining = war.grace_ends_at - datetime.utcnow()
+                if remaining.total_seconds() > 0:
+                    mins = int(remaining.total_seconds() // 60)
+                    text += f"⏳ Grace Period: {mins} daqiqa qoldi\n"
+            text += "\n"
 
         await callback.answer()
         await callback.message.answer(text, parse_mode="HTML")
@@ -724,8 +742,9 @@ async def request_betrayal(message: Message, state: FSMContext):
             await message.answer("❌ Xonadoningiz yo'q.")
             return
 
-        war = await war_repo.get_active_war(user.house_id)
-        if not war or war.status not in [WarStatusEnum.GRACE_PERIOD, WarStatusEnum.FIGHTING]:
+        wars = await war_repo.get_active_wars(user.house_id)
+        war = next((w for w in wars if w.status in [WarStatusEnum.GRACE_PERIOD, WarStatusEnum.FIGHTING]), None)
+        if not war:
             await message.answer("❌ Hozirda faol urush yo'q. Xiyonat faqat urush paytida mumkin.")
             return
 
