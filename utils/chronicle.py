@@ -38,18 +38,22 @@ async def post_to_chronicle(bot: Bot, text: str, channel: str = "chronicle") -> 
 
 
 EMOJIS = {
-    "war_declared": "⚔️",
-    "war_ended": "🏆",
-    "surrender": "🏳️",
-    "new_lord": "👑",
-    "exile": "🚪",
-    "loan": "🏦",
-    "repay": "💸",
-    "alliance": "🤝",
-    "betrayal": "🗡️",
-    "tribute": "💰",
+    "war_declared":    "⚔️",
+    "war_ended":       "🏆",
+    "surrender":       "🏳️",
+    "new_lord":        "👑",
+    "exile":           "🚪",
+    "loan":            "🏦",
+    "repay":           "💸",
+    "alliance":        "🤝",
+    "betrayal":        "🗡️",
+    "tribute":         "💰",
     "war_ally_joined": "🤝",
-    "war_power_update": "📊",
+    "war_power_update":"📊",
+    "lord_captured":   "🔗",
+    "lord_freed":      "🕊️",
+    "lord_executed":   "💀",
+    "lord_ransomed":   "💰",
 }
 
 
@@ -239,6 +243,25 @@ def format_chronicle(event_type: str, **kwargs) -> str:
             "🏰 <b>{house}</b> xonadoni Temir Bankka qarz to'ladi.\n"
             "💸 To'langan miqdor: {paid:,} tanga\n"
             "📋 Qolgan qarz: {remaining:,} tanga"
+        ),
+        "lord_captured": (
+            "🔗 <b>LORD ASIRGA OLINDI!</b>\n\n"
+            "🏰 <b>{captor}</b> xonadoni <b>{prisoner}</b> lordini asirga oldi!\n"
+            "📦 Resurslar g'olibga o'tkazildi."
+        ),
+        "lord_freed": (
+            "🕊️ <b>LORD OZOD BO'LDI!</b>\n\n"
+            "🏰 <b>{prisoner}</b> lord asirlikdan ozod bo'ldi!"
+        ),
+        "lord_executed": (
+            "💀 <b>LORD O'LDIRILDI!</b>\n\n"
+            "🏰 <b>{captor}</b> xonadoni <b>{prisoner}</b> lordini o'ldirdi!\n\n"
+            "⚠️ OGOHLANTIRISH: Bu lordga qarshi endi barcha xonadon urush e'lon qilishi mumkin!"
+        ),
+        "lord_ransomed": (
+            "💰 <b>TOVON TO'LANDI!</b>\n\n"
+            "🏰 <b>{payer}</b> xonadoni <b>{prisoner}</b> lordini tovon to'lab ozod qildi.\n"
+            "💸 Tovon: {amount:,} tanga"
         ),
     }
     template = templates.get(event_type, "📜 {description}")
