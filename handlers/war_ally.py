@@ -103,8 +103,8 @@ async def notify_allies(bot, war, house, side: str):
                 continue
 
             # O'zi urushda bo'lsa — o'tkazib yuboriladi
-            own_war = await war_repo.get_active_war(ally_id)
-            if own_war:
+            own_wars = await war_repo.get_active_wars(ally_id)
+            if own_wars:
                 continue
 
             try:
@@ -164,8 +164,8 @@ async def ally_join_full(callback: CallbackQuery):
 
         # O'zi urushda bo'lsa — yordamga qo'shila olmaydi
         war_repo = WarRepo(session)
-        own_war = await war_repo.get_active_war(user.house_id)
-        if own_war and own_war.id != war_id:
+        own_wars = await war_repo.get_active_wars(user.house_id)
+        if any(w.id != war_id for w in own_wars):
             await callback.answer(
                 "❌ Siz hozir urushda bo'lganingiz uchun yordam bera olmaysiz.",
                 show_alert=True
@@ -329,8 +329,8 @@ async def ally_send_soldiers_confirm(message: Message, state: FSMContext):
             return
 
         war_repo = WarRepo(session)
-        own_war = await war_repo.get_active_war(user.house_id)
-        if own_war and own_war.id != war_id:
+        own_wars = await war_repo.get_active_wars(user.house_id)
+        if any(w.id != war_id for w in own_wars):
             await message.answer("❌ Siz hozir urushda bo'lganingiz uchun yordam bera olmaysiz.")
             await state.clear()
             return
@@ -483,8 +483,8 @@ async def ally_send_gold_confirm(message: Message, state: FSMContext):
             return
 
         war_repo = WarRepo(session)
-        own_war = await war_repo.get_active_war(user.house_id)
-        if own_war and own_war.id != war_id:
+        own_wars = await war_repo.get_active_wars(user.house_id)
+        if any(w.id != war_id for w in own_wars):
             await message.answer("❌ Siz hozir urushda bo'lganingiz uchun yordam bera olmaysiz.")
             await state.clear()
             return
