@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command
 from datetime import datetime, timedelta
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo, WarRepo, AllianceGroupRepo, ChronicleRepo, WarDeploymentRepo
+from database.repositories import UserRepo, HouseRepo, WarRepo, AllianceGroupRepo, ChronicleRepo, WarDeploymentRepo, PrisonerRepo
 from database.models import RoleEnum, WarStatusEnum, WarAllySupport
 from keyboards import war_menu_keyboard, house_list_keyboard, surrender_or_fight_keyboard
 from keyboards.keyboards import war_selection_keyboard, deploy_resources_keyboard, deploy_confirm_keyboard
@@ -229,16 +229,47 @@ async def declare_war_start(callback: CallbackQuery, state: FSMContext):
             await callback.answer("❌ Urush ochish uchun resurslaringiz yo'q.", show_alert=True)
             return
 
+        # 7-BOSQICH: Asir lord urush ocha olmaydi
+        prisoner_repo = PrisonerRepo(session)
+        is_prisoner = await prisoner_repo.get_by_prisoner_user(user.id)
+        if is_prisoner:
+            await callback.answer("❌ Asirlikda urush e'lon qilib bo'lmaydi!", show_alert=True)
+            return
+
         # High Lord — barcha hududlarga urush ochishi mumkin
         # Lord — faqat o'z hududidagi xonadonga urush ochishi mumkin
+        # ISTISNO: Agar maqsad xonadon o'ldirilgan lord xonadoni bo'lsa —
+        #           executed_lord_flag=True → hudud cheklovi yo'q
         if user.role == RoleEnum.HIGH_LORD:
             all_houses = await house_repo.get_all()
             targets = [h for h in all_houses if h.id != user.house_id]
             hudud_text = "🌍 Barcha hududlar"
         else:
-            region_houses = await house_repo.get_all_by_region(attacker_house.region)
-            targets = [h for h in region_houses if h.id != user.house_id]
-            hudud_text = f"📍 Hudud: <b>{attacker_house.region.value}</b>"
+            # executed_lord_flag=True bo'lgan xonadonlarni topish
+            from sqlalchemy import select as _sel
+            from database.models import War as _War
+            executed_wars = await session.execute(
+                _sel(_War.defender_house_id)
+                .where(_War.executed_lord_flag == True)
+                .distinct()
+            )
+            executed_house_ids = {row[0] for row in executed_wars.fetchall()}
+
+            all_houses = await house_repo.get_all()
+            targets = [
+                h for h in all_houses
+                if h.id != user.house_id and (
+                    h.region == attacker_house.region or
+                    h.id in executed_house_ids
+                )
+            ]
+            if executed_house_ids & {h.id for h in targets if h.region != attacker_house.region}:
+                hudud_text = (
+                    f"📍 Hudud: <b>{attacker_house.region.value}</b>\n"
+                    f"⚠️ O'ldirilgan lord xonadonlariga ham urush ochish mumkin"
+                )
+            else:
+                hudud_text = f"📍 Hudud: <b>{attacker_house.region.value}</b>"
 
         if not targets:
             await callback.answer(
