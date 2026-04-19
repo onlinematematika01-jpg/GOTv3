@@ -41,12 +41,14 @@ async def cmd_start(message: Message):
         # Format: /start USERID               (oddiy referal)
         invite_house_id = None
         referral_by     = None
+        invite_link_used = False  # taklif linki ishlatilganmi?
 
         if len(args) > 1:
             param = args[1]
 
             # Xonadon taklifi: house_37_123456789
             if param.startswith("house_"):
+                invite_link_used = True  # link ishlatildi — natijasidan qat'iy nazar
                 parts = param.split("_")
                 if len(parts) == 3:
                     try:
@@ -55,20 +57,39 @@ async def cmd_start(message: Message):
                         house = await house_repo.get_by_id(h_id)
                         lord  = await user_repo.get_by_id(l_id)
                         # Lord hali ham shu xonadondami?
-                        if house and lord and lord.house_id == h_id:
-                            # Bo'sh joy bormi?
-                            from sqlalchemy import select, func
-                            from database.models import User as UserModel
-                            cnt_res = await session.execute(
-                                select(func.count(UserModel.id))
-                                .where(UserModel.house_id == h_id, UserModel.is_active == True)
+                        if not house:
+                            await message.answer("❌ Taklif linki yaroqsiz: xonadon topilmadi.")
+                            return
+                        if not lord or lord.house_id != h_id:
+                            await message.answer(
+                                "❌ Taklif linki yaroqsiz: lord bu xonadondan endi a'zo emas.\n"
+                                "Lorddan yangi link so'rang."
                             )
-                            cnt = cnt_res.scalar() or 0
-                            if cnt < settings.MAX_HOUSE_MEMBERS:
-                                invite_house_id = h_id
-                                referral_by     = l_id
+                            return
+                        # Bo'sh joy bormi?
+                        from sqlalchemy import select, func
+                        from database.models import User as UserModel
+                        cnt_res = await session.execute(
+                            select(func.count(UserModel.id))
+                            .where(UserModel.house_id == h_id, UserModel.is_active == True)
+                        )
+                        cnt = cnt_res.scalar() or 0
+                        if cnt >= settings.MAX_HOUSE_MEMBERS:
+                            await message.answer(
+                                f"❌ Taklif linki yaroqsiz: <b>{house.name}</b> xonadoni to'lgan "
+                                f"({cnt}/{settings.MAX_HOUSE_MEMBERS}).\n"
+                                "Lorddan xabar bering.",
+                                parse_mode="HTML"
+                            )
+                            return
+                        invite_house_id = h_id
+                        referral_by     = l_id
                     except (ValueError, TypeError):
-                        pass
+                        await message.answer("❌ Taklif linki noto'g'ri formatda.")
+                        return
+                else:
+                    await message.answer("❌ Taklif linki noto'g'ri formatda.")
+                    return
 
             # Oddiy referal: faqat user_id
             else:
