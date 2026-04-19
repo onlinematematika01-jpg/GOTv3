@@ -3,7 +3,8 @@ from .keyboards import (
     iron_bank_keyboard, diplomacy_keyboard, surrender_or_fight_keyboard,
     confirm_keyboard, admin_keyboard, house_list_keyboard, quantity_keyboard,
     back_only_keyboard, with_back, back_button, rating_menu_keyboard,
-    alliance_request_keyboard, alliance_group_menu_keyboard, alliance_invite_keyboard
+    alliance_request_keyboard, alliance_group_menu_keyboard, alliance_invite_keyboard,
+    deploy_resources_keyboard, deploy_confirm_keyboard,
 )
 
 __all__ = [
@@ -11,5 +12,6 @@ __all__ = [
     "iron_bank_keyboard", "diplomacy_keyboard", "surrender_or_fight_keyboard",
     "confirm_keyboard", "admin_keyboard", "house_list_keyboard", "quantity_keyboard",
     "back_only_keyboard", "with_back", "back_button", "rating_menu_keyboard",
-    "alliance_request_keyboard", "alliance_group_menu_keyboard", "alliance_invite_keyboard"
+    "alliance_request_keyboard", "alliance_group_menu_keyboard", "alliance_invite_keyboard",
+    "deploy_resources_keyboard", "deploy_confirm_keyboard",
 ]
