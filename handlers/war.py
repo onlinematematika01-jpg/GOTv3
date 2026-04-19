@@ -631,7 +631,7 @@ async def war_surrender_button(callback: CallbackQuery):
             await callback.answer()
             await callback.message.answer(
                 "⚠️ Qaysi urushda taslim bo'lmoqchisiz?",
-                reply_markup=war_selection_keyboard(defender_wars, "do_surrender"),
+                reply_markup=war_selection_keyboard(defender_wars, "do_surrender", user.house_id),
                 parse_mode="HTML"
             )
 
@@ -683,7 +683,7 @@ async def war_fight_button(callback: CallbackQuery):
             await callback.answer()
             await callback.message.answer(
                 "⚔️ Qaysi urush holatini ko'rmoqchisiz?",
-                reply_markup=war_selection_keyboard(active_wars, "do_fight"),
+                reply_markup=war_selection_keyboard(active_wars, "do_fight", user.house_id),
                 parse_mode="HTML"
             )
 
