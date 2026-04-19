@@ -1367,3 +1367,165 @@ class IronBankDepositRepo:
             )
         )
         await self.session.commit()
+
+
+class WarDeploymentRepo:
+    """Jangga yuborilgan resurslar bilan ishlash"""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_deployment(self, war_id: int, house_id: int):
+        """war_id + house_id bo'yicha deployment topish"""
+        from database.models import WarDeployment
+        result = await self.session.execute(
+            select(WarDeployment).where(
+                WarDeployment.war_id == war_id,
+                WarDeployment.house_id == house_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_all_for_war(self, war_id: int) -> list:
+        """Urushning barcha deploymentlarini olish"""
+        from database.models import WarDeployment
+        from sqlalchemy.orm import selectinload
+        result = await self.session.execute(
+            select(WarDeployment)
+            .where(WarDeployment.war_id == war_id)
+            .options(selectinload(WarDeployment.house))
+        )
+        return result.scalars().all()
+
+    async def upsert(self, war_id: int, house_id: int,
+                     soldiers: int, dragons: int, scorpions: int):
+        """Mavjud bo'lsa yangilash, bo'lmasa yaratish"""
+        from database.models import WarDeployment
+        existing = await self.get_deployment(war_id, house_id)
+        if existing:
+            existing.soldiers       = soldiers
+            existing.dragons        = dragons
+            existing.scorpions      = scorpions
+            existing.is_auto_defend = False
+        else:
+            dep = WarDeployment(
+                war_id=war_id, house_id=house_id,
+                soldiers=soldiers, dragons=dragons,
+                scorpions=scorpions, is_auto_defend=False,
+            )
+            self.session.add(dep)
+        await self.session.commit()
+
+    async def add_to_existing(self, war_id: int, house_id: int,
+                              soldiers: int, dragons: int, scorpions: int):
+        """Mavjud deploymentga qo'shish (qayta yuborish)"""
+        existing = await self.get_deployment(war_id, house_id)
+        if existing:
+            await self.upsert(
+                war_id, house_id,
+                existing.soldiers  + soldiers,
+                existing.dragons   + dragons,
+                existing.scorpions + scorpions,
+            )
+        else:
+            await self.upsert(war_id, house_id, soldiers, dragons, scorpions)
+
+    async def set_auto_defend(self, war_id: int, house_id: int):
+        """Mudofaachi resurs yubormadi — auto_defend belgisi"""
+        from database.models import WarDeployment
+        dep = await self.get_deployment(war_id, house_id)
+        if not dep:
+            dep = WarDeployment(
+                war_id=war_id, house_id=house_id,
+                soldiers=0, dragons=0, scorpions=0,
+                is_auto_defend=True,
+            )
+            self.session.add(dep)
+        else:
+            dep.is_auto_defend = True
+        await self.session.commit()
+
+
+class PrisonerRepo:
+    """Asirga olingan lordlar bilan ishlash"""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_by_id(self, prisoner_id: int):
+        from database.models import Prisoner
+        from sqlalchemy.orm import selectinload
+        result = await self.session.execute(
+            select(Prisoner).where(Prisoner.id == prisoner_id)
+            .options(
+                selectinload(Prisoner.prisoner_user),
+                selectinload(Prisoner.captor_house),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def create(self, prisoner_user_id: int,
+                     captor_house_id: int, war_id: int):
+        from database.models import Prisoner
+        p = Prisoner(
+            prisoner_user_id=prisoner_user_id,
+            captor_house_id=captor_house_id,
+            war_id=war_id,
+        )
+        self.session.add(p)
+        await self.session.commit()
+        await self.session.refresh(p)
+        return p
+
+    async def get_active_for_house(self, captor_house_id: int) -> list:
+        """G'olib xonadon ushlab turgan aktiv asirlar"""
+        from database.models import Prisoner, PrisonerStatusEnum
+        from sqlalchemy.orm import selectinload
+        result = await self.session.execute(
+            select(Prisoner).where(
+                Prisoner.captor_house_id == captor_house_id,
+                Prisoner.status == PrisonerStatusEnum.CAPTURED,
+            ).options(selectinload(Prisoner.prisoner_user))
+        )
+        return result.scalars().all()
+
+    async def get_by_prisoner_user(self, user_id: int):
+        """Asir user — o'zi qayerda asirligini biladi"""
+        from database.models import Prisoner, PrisonerStatusEnum
+        from sqlalchemy.orm import selectinload
+        result = await self.session.execute(
+            select(Prisoner).where(
+                Prisoner.prisoner_user_id == user_id,
+                Prisoner.status == PrisonerStatusEnum.CAPTURED,
+            ).options(selectinload(Prisoner.captor_house))
+        )
+        return result.scalar_one_or_none()
+
+    async def set_ransom(self, prisoner_id: int, amount: int):
+        """Tovon pulini belgilash"""
+        from database.models import Prisoner
+        await self.session.execute(
+            update(Prisoner).where(Prisoner.id == prisoner_id)
+            .values(ransom_amount=amount)
+        )
+        await self.session.commit()
+
+    async def free(self, prisoner_id: int):
+        """Asirni ozod qilish"""
+        from database.models import Prisoner, PrisonerStatusEnum
+        from datetime import datetime
+        await self.session.execute(
+            update(Prisoner).where(Prisoner.id == prisoner_id)
+            .values(status=PrisonerStatusEnum.FREED, freed_at=datetime.utcnow())
+        )
+        await self.session.commit()
+
+    async def execute_prisoner(self, prisoner_id: int):
+        """Asirni o'ldirish"""
+        from database.models import Prisoner, PrisonerStatusEnum
+        from datetime import datetime
+        await self.session.execute(
+            update(Prisoner).where(Prisoner.id == prisoner_id)
+            .values(status=PrisonerStatusEnum.EXECUTED, freed_at=datetime.utcnow())
+        )
+        await self.session.commit()
