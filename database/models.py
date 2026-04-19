@@ -408,6 +408,48 @@ class TournamentAnswer(Base):
     question = relationship("TournamentQuestion", back_populates="answers")
 
 
+class KnightOrderStatusEnum(str, enum.Enum):
+    PENDING  = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
+class KnightProfile(Base):
+    """Ritsar profili — alohida askar zaxirasi va cheklovlar"""
+    __tablename__ = "knight_profiles"
+
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    user_id        = Column(BigInteger, ForeignKey("users.id"), nullable=False, unique=True)
+    house_id       = Column(Integer, ForeignKey("houses.id"), nullable=False)
+    soldiers       = Column(Integer, default=0)
+    last_farm_date = Column(DateTime, nullable=True)
+    appointed_at   = Column(DateTime, server_default=func.now())
+    is_active      = Column(Boolean, default=True)
+
+    user  = relationship("User", foreign_keys=[user_id])
+    house = relationship("House", foreign_keys=[house_id])
+
+
+class KnightOrder(Base):
+    """Lord ritsarga yuborgan urush buyrug'i"""
+    __tablename__ = "knight_orders"
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    war_id       = Column(Integer, ForeignKey("wars.id"), nullable=False)
+    house_id     = Column(Integer, ForeignKey("houses.id"), nullable=False)
+    knight_id    = Column(BigInteger, ForeignKey("users.id"), nullable=False)
+    lord_id      = Column(BigInteger, ForeignKey("users.id"), nullable=False)
+    soldiers     = Column(Integer, default=0)
+    status       = Column(Enum(KnightOrderStatusEnum), default=KnightOrderStatusEnum.PENDING)
+    created_at   = Column(DateTime, server_default=func.now())
+    responded_at = Column(DateTime, nullable=True)
+
+    war    = relationship("War", foreign_keys=[war_id])
+    knight = relationship("User", foreign_keys=[knight_id])
+    lord   = relationship("User", foreign_keys=[lord_id])
+    house  = relationship("House", foreign_keys=[house_id])
+
+
 class PrisonerStatusEnum(str, enum.Enum):
     CAPTURED = "captured"
     FREED    = "freed"
