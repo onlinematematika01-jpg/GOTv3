@@ -3,6 +3,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery
 from database.engine import AsyncSessionFactory
 from database.repositories import UserRepo, PrisonerRepo
+from config.settings import settings
 
 
 # Asir lordga ruxsat berilgan tugmalar / komandalar
@@ -24,12 +25,21 @@ class AuthMiddleware(BaseMiddleware):
         if not user_tg:
             return await handler(event, data)
 
+        # Admin bo'lsa — hech qanday cheklovsiz o'tkazib yuborish
+        if user_tg.id in settings.ADMIN_IDS:
+            async with AsyncSessionFactory() as session:
+                user_repo = UserRepo(session)
+                user = await user_repo.get_by_id(user_tg.id)
+                data["db_user"] = user
+                data["session"] = session
+                return await handler(event, data)
+
         async with AsyncSessionFactory() as session:
             user_repo     = UserRepo(session)
             prisoner_repo = PrisonerRepo(session)
             user = await user_repo.get_by_id(user_tg.id)
 
-            # Asir lord tekshiruvi
+            # Asir lord tekshiruvi (faqat oddiy foydalanuvchilar uchun)
             if user:
                 active_prisoner = await prisoner_repo.get_by_prisoner_user(user.id)
                 if active_prisoner:
@@ -52,10 +62,7 @@ class AuthMiddleware(BaseMiddleware):
                             )
                             return
 
-            # Admin tekshiruvi
-            from config.settings import settings
-            # Admin IDs ni .env dan olish mumkin yoki DB dan
-
             data["db_user"] = user
             data["session"] = session
             return await handler(event, data)
+                        
