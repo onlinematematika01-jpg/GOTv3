@@ -249,9 +249,12 @@ async def process_repay(message: Message, state: FSMContext):
             await state.clear()
             return
 
+        # Xonadonning haqiqiy qarzini olamiz ("hammasi" uchun)
+        house_debt_now = await iron_bank_repo.get_house_active_debt(user.house_id)
+
         text = message.text.strip().lower()
         if text in ["hammasi", "all", "barchasi"]:
-            amount = user.debt
+            amount = house_debt_now
         else:
             try:
                 amount = int(text)
@@ -308,16 +311,17 @@ async def bank_status(callback: CallbackQuery):
 
         result = await session.execute(
             select(IronBankLoan).where(
-                IronBankLoan.user_id == callback.from_user.id,
+                IronBankLoan.house_id == user.house_id,
                 IronBankLoan.paid == False,
             )
         )
         loans = result.scalars().all()
+        house_total_debt = sum(loan.total_due for loan in loans)
 
         text = (
             f"🏦 <b>Temir Bank Holati</b>\n\n"
             f"💰 Xonadon xazinasi: {treasury:,} tanga\n"
-            f"📋 Jami qarz: {user.debt:,}\n\n"
+            f"📋 Jami qarz: {house_total_debt:,}\n\n"
         )
         if loans:
             text += "<b>Faol qarzlar:</b>\n"
