@@ -106,6 +106,7 @@ async def capture_lord(callback: CallbackQuery):
             "lord_captured",
             captor=captor_house.name,
             prisoner=prisoner_user.full_name,
+            prisoner_house=prisoner_house.name,
         )
         tg_id = await post_to_chronicle(callback.bot, text)
         await chronicle_repo.add("lord_captured", text,
@@ -149,12 +150,45 @@ async def capture_skip(callback: CallbackQuery):
 # ASIRLAR PANELI
 # ─────────────────────────────────────────────────────────────────
 
+@router.callback_query(F.data == "prisoner:my_status")
+async def my_prisoner_status(callback: CallbackQuery):
+    """Asir lord o'z asirligini tekshiradi — kim asiri ekanini ko'radi"""
+    async with AsyncSessionFactory() as session:
+        user_repo     = UserRepo(session)
+        prisoner_repo = PrisonerRepo(session)
+        house_repo    = HouseRepo(session)
+
+        user     = await user_repo.get_by_id(callback.from_user.id)
+        prisoner = await prisoner_repo.get_by_prisoner_user(callback.from_user.id)
+
+    if not prisoner:
+        await callback.answer("Siz hozir asirda emassiz.", show_alert=True)
+        return
+
+    captor = prisoner.captor_house
+    ransom_text = (
+        f"💰 Tovon: <b>{prisoner.ransom_amount:,} tanga</b>"
+        if prisoner.ransom_amount and prisoner.ransom_amount > 0
+        else "💰 Tovon: <i>Belgilanmagan</i>"
+    )
+
+    await callback.answer()
+    await callback.message.answer(
+        f"🔗 <b>ASIRLIK HOLATI</b>\n\n"
+        f"Siz hozir <b>{captor.name}</b> xonadoni asiridasiz.\n\n"
+        f"{ransom_text}\n\n"
+        f"Ozod bo'lish uchun ittifoqchilaringizdan tovon to'lashlarini so'rang.",
+        parse_mode="HTML"
+    )
+
+
 @router.callback_query(F.data == "prisoner:list")
 async def prisoner_list(callback: CallbackQuery):
     """G'olib xonadonning asirlar ro'yxati"""
     async with AsyncSessionFactory() as session:
         user_repo     = UserRepo(session)
         prisoner_repo = PrisonerRepo(session)
+        house_repo    = HouseRepo(session)
         user = await user_repo.get_by_id(callback.from_user.id)
 
         if not user or not user.house_id:
@@ -162,6 +196,15 @@ async def prisoner_list(callback: CallbackQuery):
             return
 
         prisoners = await prisoner_repo.get_active_for_house(user.house_id)
+
+        # Har bir asir uchun xonadon nomini olish
+        prisoner_house_names = {}
+        for p in prisoners:
+            if p.prisoner_user and p.prisoner_user.house_id:
+                h = await house_repo.get_by_id(p.prisoner_user.house_id)
+                prisoner_house_names[p.id] = h.name if h else "Noma'lum"
+            else:
+                prisoner_house_names[p.id] = "Noma'lum"
 
     if not prisoners:
         await callback.answer("Asirlar yo'q.", show_alert=True)
@@ -171,8 +214,10 @@ async def prisoner_list(callback: CallbackQuery):
     text = "🔗 <b>ASIRLAR PANELI</b>\n\n"
     for p in prisoners:
         ransom_text = f"{p.ransom_amount:,} tanga" if p.ransom_amount else "Belgilanmagan"
+        house_name = prisoner_house_names.get(p.id, "Noma'lum")
         text += (
-            f"👤 {p.prisoner_user.full_name}\n"
+            f"👤 <b>{p.prisoner_user.full_name}</b>\n"
+            f"🏰 Xonadon: <b>{house_name}</b>\n"
             f"💰 Tovon: {ransom_text}\n\n"
         )
 
