@@ -1548,6 +1548,37 @@ class PrisonerRepo:
         )
         await self.session.commit()
 
+    async def get_captors_ranking(self) -> list:
+        """Har bir xonadon ushlab turgan aktiv asirlar soni bo'yicha reyting"""
+        from database.models import Prisoner, PrisonerStatusEnum, House
+        from sqlalchemy.orm import selectinload
+        result = await self.session.execute(
+            select(Prisoner).where(
+                Prisoner.status == PrisonerStatusEnum.CAPTURED,
+            ).options(
+                selectinload(Prisoner.prisoner_user),
+                selectinload(Prisoner.captor_house),
+            )
+        )
+        all_prisoners = result.scalars().all()
+
+        # captor_house_id bo'yicha guruhlash
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for p in all_prisoners:
+            groups[p.captor_house_id].append(p)
+
+        ranking = []
+        for house_id, prisoners in groups.items():
+            house = prisoners[0].captor_house
+            ranking.append({
+                "house": house,
+                "prisoners": prisoners,
+                "count": len(prisoners),
+            })
+        ranking.sort(key=lambda x: x["count"], reverse=True)
+        return ranking
+
 
 class KnightRepo:
     def __init__(self, session):
