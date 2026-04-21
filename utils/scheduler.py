@@ -1067,61 +1067,7 @@ async def _handle_lord_succession(session, war, bot):
     await session.commit()
 
 
-async def check_iron_bank_debt_job(bot: Bot):
-    """Har kuni qarzni tekshirish, muddati o'tganlarga jazo berish"""
-    from database.repositories import IronBankRepo, UserRepo, HouseRepo
-    from sqlalchemy import select
-    from database.models import IronBankLoan
 
-    async with AsyncSessionFactory() as session:
-        now = datetime.utcnow()
-        result = await session.execute(
-            select(IronBankLoan).where(
-                IronBankLoan.paid == False,
-                IronBankLoan.due_date <= now,
-            )
-        )
-        overdue = result.scalars().all()
-
-        iron_bank_repo = IronBankRepo(session)
-        user_repo = UserRepo(session)
-        house_repo = HouseRepo(session)
-
-        # Bir xonadonga bir marta musodara — house_id bo'yicha deduplikatsiya
-        processed_houses = set()
-
-        for loan in overdue:
-            user = await user_repo.get_by_id(loan.user_id)
-            if not user or not user.house_id:
-                continue
-            if user.house_id in processed_houses:
-                continue
-
-            house_debt = await iron_bank_repo.get_house_active_debt(user.house_id)
-            if house_debt <= 0:
-                continue
-
-            processed_houses.add(user.house_id)
-            await iron_bank_repo.confiscate_for_debt(user)
-
-            house = await house_repo.get_by_id(user.house_id)
-            house_name = house.name if house else "Xonadon"
-
-            # Xonadonning barcha a'zolariga xabar
-            members = await user_repo.get_house_members(user.house_id)
-            for member in members:
-                try:
-                    await bot.send_message(
-                        member.id,
-                        f"🏦 <b>TEMIR BANK MUSODARA!</b>\n\n"
-                        f"🏰 <b>{house_name}</b> xonadonining qarzi muddati o'tdi.\n"
-                        f"Barcha qo'shin, ajdar, skorpion va maxsus qurollar musodara qilindi!",
-                        parse_mode="HTML"
-                    )
-                except Exception:
-                    pass
-
-        logger.info(f"Temir Bank tekshiruvi: {len(processed_houses)} ta xonadon musodara qilindi")
 
 
 async def reload_farm_jobs(bot):
@@ -1198,15 +1144,6 @@ async def setup_scheduler(scheduler: AsyncIOScheduler, bot: Bot):
         CronTrigger(hour=23, minute=0, timezone="Asia/Tashkent"),
         args=[bot],
         id="war_end",
-        replace_existing=True,
-    )
-
-    # Temir Bank tekshiruvi - har kuni 00:00 Toshkent
-    scheduler.add_job(
-        check_iron_bank_debt_job,
-        CronTrigger(hour=0, minute=0, timezone="Asia/Tashkent"),
-        args=[bot],
-        id="iron_bank_check",
         replace_existing=True,
     )
 
