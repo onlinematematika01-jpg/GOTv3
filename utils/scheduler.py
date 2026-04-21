@@ -791,10 +791,15 @@ async def _run_war_v2(war, bot, session):
                 scorpions=-result.attacker_scorpions_lost,
             )
         else:
-            # Deployment hujumchi: resurslar allaqachon ayirilgan → faqat o'lja QO'SHILADI
+            # Deployment hujumchi: resurslar allaqachon ayirilgan
+            # Tirik qolganlar (deployed - lost) + o'lja qaytariladi
+            att_survivors_s  = att_soldiers  - result.attacker_soldiers_lost
+            att_survivors_d  = att_dragons   - result.attacker_dragons_lost
+            att_survivors_sc = att_scorpions - result.attacker_scorpions_lost
             await house_repo.update_military(attacker.id,
-                soldiers=result.loot_soldiers,
-                dragons=result.loot_dragons,
+                soldiers=att_survivors_s  + result.loot_soldiers,
+                dragons=att_survivors_d   + result.loot_dragons,
+                scorpions=att_survivors_sc,
             )
 
         if def_auto:
@@ -805,11 +810,15 @@ async def _run_war_v2(war, bot, session):
                 scorpions=-result.defender_scorpions_lost,
             )
         else:
-            # Deployment mudofaachi: deployment resurslar allaqachon ayirilgan
-            # Faqat o'lja chiqarish (qolgan balansdan)
+            # Deployment mudofaachi: resurslar allaqachon ayirilgan
+            # Tirik qolganlardan o'lja chiqariladi, qolgan qaytariladi
+            def_survivors_s  = def_soldiers  - result.defender_soldiers_lost
+            def_survivors_d  = def_dragons   - result.defender_dragons_lost
+            def_survivors_sc = def_scorpions - result.defender_scorpions_lost
             await house_repo.update_military(defender.id,
-                soldiers=-result.loot_soldiers,
-                dragons=-result.loot_dragons,
+                soldiers=def_survivors_s  - result.loot_soldiers,
+                dragons=def_survivors_d   - result.loot_dragons,
+                scorpions=def_survivors_sc,
             )
 
         await _transfer_custom_item_loot(session, loser_id=defender.id, winner_id=attacker.id)
@@ -829,10 +838,15 @@ async def _run_war_v2(war, bot, session):
                 scorpions=-result.attacker_scorpions_lost,
             )
         else:
-            # Deployment hujumchi yutqazdi — allaqachon ayirilgan, o'lja ham bor
+            # Deployment hujumchi yutqazdi — resurslar allaqachon ayirilgan
+            # Tirik qolganlardan o'lja chiqariladi, qolgan qaytariladi
+            att_survivors_s  = att_soldiers  - result.attacker_soldiers_lost
+            att_survivors_d  = att_dragons   - result.attacker_dragons_lost
+            att_survivors_sc = att_scorpions - result.attacker_scorpions_lost
             await house_repo.update_military(attacker.id,
-                soldiers=-result.loot_soldiers,
-                dragons=-result.loot_dragons,
+                soldiers=att_survivors_s  - result.loot_soldiers,
+                dragons=att_survivors_d   - result.loot_dragons,
+                scorpions=att_survivors_sc,
             )
 
         if def_auto:
@@ -842,10 +856,15 @@ async def _run_war_v2(war, bot, session):
                 scorpions=-result.defender_scorpions_lost,
             )
         else:
-            # Deployment mudofaachi yutdi — allaqachon ayirilgan → o'lja QO'SHILADI
+            # Deployment mudofaachi yutdi — resurslar allaqachon ayirilgan
+            # Tirik qolganlar (deployed - lost) + o'lja qaytariladi
+            def_survivors_s  = def_soldiers  - result.defender_soldiers_lost
+            def_survivors_d  = def_dragons   - result.defender_dragons_lost
+            def_survivors_sc = def_scorpions - result.defender_scorpions_lost
             await house_repo.update_military(defender.id,
-                soldiers=result.loot_soldiers,
-                dragons=result.loot_dragons,
+                soldiers=def_survivors_s  + result.loot_soldiers,
+                dragons=def_survivors_d   + result.loot_dragons,
+                scorpions=def_survivors_sc,
             )
 
         await _transfer_custom_item_loot(session, loser_id=attacker.id, winner_id=defender.id)
