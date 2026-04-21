@@ -246,7 +246,8 @@ def format_chronicle(event_type: str, **kwargs) -> str:
         ),
         "lord_captured": (
             "🔗 <b>LORD ASIRGA OLINDI!</b>\n\n"
-            "🏰 <b>{captor}</b> xonadoni <b>{prisoner}</b> lordini asirga oldi!\n"
+            "🏰 <b>{captor}</b> xonadoni <b>{prisoner_house}</b> xonadoni lordi "
+            "<b>{prisoner}</b>ni asirga oldi!\n"
             "📦 Resurslar g'olibga o'tkazildi."
         ),
         "lord_freed": (
