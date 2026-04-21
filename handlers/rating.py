@@ -3,7 +3,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database.engine import AsyncSessionFactory
-from database.repositories import RatingRepo, CustomItemRepo, AllianceGroupRepo, HouseRepo
+from database.repositories import RatingRepo, CustomItemRepo, AllianceGroupRepo, HouseRepo, PrisonerRepo
 from database.models import RegionEnum
 from keyboards import rating_menu_keyboard
 
@@ -205,6 +205,31 @@ REGION_EMOJIS = {
 }
 
 
+async def _get_prisoners_data(session) -> list:
+    """Har bir xonadon ushlab turgan aktiv asirlar soni bo'yicha reyting"""
+    return await PrisonerRepo(session).get_captors_ranking()
+
+
+def _build_prisoners_page(data: list, page: int) -> str:
+    start = page * PAGE_SIZE
+    lines = ["⛓️ <b>ASIRLAR REYTINGI</b>\n"]
+    if not data:
+        lines.append("Hozircha hech kim asirda emas.")
+        return "\n".join(lines)
+    for i, entry in enumerate(data[start: start + PAGE_SIZE]):
+        house = entry["house"]
+        prisoners = entry["prisoners"]
+        prisoner_list_str = "\n".join(
+            f"   • {p.prisoner_user.full_name}"
+            for p in prisoners
+        )
+        lines.append(
+            f"{get_medal(start + i)} <b>{house.name}</b>  —  {entry['count']} asir\n"
+            f"{prisoner_list_str}"
+        )
+    return "\n\n".join(lines)
+
+
 async def _get_regions_data(session) -> list:
     house_repo = HouseRepo(session)
     alliance_repo = AllianceGroupRepo(session)
@@ -291,6 +316,7 @@ RATING_HANDLERS = {
     "alliances": (_get_alliances_data, _build_alliances_page),
     "deposit":   (_get_deposit_data,   _build_deposit_page),
     "regions":   (_get_regions_data,   _build_regions_page),
+    "prisoners": (_get_prisoners_data, _build_prisoners_page),
 }
 
 
@@ -369,6 +395,10 @@ async def rating_deposit(callback: CallbackQuery):
 @router.callback_query(F.data == "rating:regions")
 async def rating_regions(callback: CallbackQuery):
     await _show_rating(callback, "regions", 0)
+
+@router.callback_query(F.data == "rating:prisoners")
+async def rating_prisoners(callback: CallbackQuery):
+    await _show_rating(callback, "prisoners", 0)
 
 
 @router.callback_query(F.data.startswith("rating_page:"))
