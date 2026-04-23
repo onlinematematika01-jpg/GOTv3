@@ -816,6 +816,10 @@ class HukmdorClaimRepo:
                     except Exception:
                         pass
 
+        # BOSQICH 10 — Yangi hukmdor belgilanganda eski garnizon tozalanadi
+        garrison_repo = TerritoryGarrisonRepo(self.session)
+        await garrison_repo.clear_garrison(region)
+
         await self.session.commit()
 
 
