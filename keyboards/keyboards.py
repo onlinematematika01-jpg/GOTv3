@@ -181,6 +181,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="⚔️ Ritsar Sozlamalari", callback_data="admin:knight_settings")
     builder.button(text="⏸ O'yinni Pauza/Davom", callback_data="admin:toggle_pause")
     builder.button(text="🏰 Xonadon Resurslari",  callback_data="admin:house_resources")
+    builder.button(text="🎒 Xonadon Itemlari",    callback_data="admin:house_items")
     builder.adjust(2)
     return builder.as_markup()
 
