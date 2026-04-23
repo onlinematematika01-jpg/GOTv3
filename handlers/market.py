@@ -3,7 +3,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo, MarketRepo, CustomItemRepo
+from database.repositories import UserRepo, HouseRepo, MarketRepo, CustomItemRepo, HouseResourcesRepo, DailyPurchaseRepo
 from keyboards import market_keyboard, quantity_keyboard, back_only_keyboard
 from keyboards.keyboards import custom_item_market_keyboard
 from sqlalchemy import update
@@ -182,6 +182,8 @@ async def _do_purchase(message, bot, user_id: int, item: str, qty: int, state: F
         user_repo = UserRepo(session)
         house_repo = HouseRepo(session)
         market_repo = MarketRepo(session)
+        res_repo = HouseResourcesRepo(session)
+        purchase_repo = DailyPurchaseRepo(session)
 
         user = await user_repo.get_by_id(user_id)
         if not user or not user.house_id:
@@ -194,6 +196,32 @@ async def _do_purchase(message, bot, user_id: int, item: str, qty: int, state: F
             await message.answer("❌ Xonadon topilmadi.")
             await state.clear()
             return
+
+        # Kunlik limit tekshiruvi (dragon va scorpion uchun)
+        if item in ("dragon", "scorpion"):
+            res   = await res_repo.get_or_create(user.house_id)
+            today = await purchase_repo.get_today(user_id, user.house_id)
+            if item == "dragon":
+                limit = res.dragon_buy_limit
+                bought = today.dragons
+                label_limit = "🐉 Ajdar kunlik limiti"
+            else:
+                limit = res.scorpion_buy_limit
+                bought = today.scorpions
+                label_limit = "🏹 Skorpion kunlik limiti"
+
+            if bought + qty > limit:
+                remaining = max(0, limit - bought)
+                await message.answer(
+                    f"❌ <b>{label_limit} oshib ketdi!</b>\n\n"
+                    f"Kunlik limit: <b>{limit}</b> ta\n"
+                    f"Bugun sotib olingan: <b>{bought}</b> ta\n"
+                    f"Qolgan imkoniyat: <b>{remaining}</b> ta",
+                    reply_markup=back_only_keyboard("market:back"),
+                    parse_mode="HTML"
+                )
+                await state.clear()
+                return
 
         price = await market_repo.get_price(item)
         total_cost = price * qty
@@ -226,6 +254,9 @@ async def _do_purchase(message, bot, user_id: int, item: str, qty: int, state: F
                 **{house_field: getattr(House, house_field) + qty}
             )
         )
+        # Kunlik xarid hisobini yangilash
+        _pk = {"soldier": "soldiers", "dragon": "dragons", "scorpion": "scorpions"}
+        await purchase_repo.add_purchase(user_id, user.house_id, **{_pk[item]: qty})
         await session.commit()
 
         item_label = ITEM_NAMES.get(item, item)
@@ -312,6 +343,8 @@ async def _do_custom_purchase(message, bot, user_id: int, item_id: int, qty: int
         user_repo = UserRepo(session)
         house_repo = HouseRepo(session)
         custom_repo = CustomItemRepo(session)
+        res_repo = HouseResourcesRepo(session)
+        purchase_repo = DailyPurchaseRepo(session)
 
         user = await user_repo.get_by_id(user_id)
         if not user or not user.house_id:
@@ -324,6 +357,22 @@ async def _do_custom_purchase(message, bot, user_id: int, item_id: int, qty: int
 
         if not item or not item.is_active:
             await message.answer("❌ Item topilmadi yoki sotuvda yo'q.")
+            await state.clear()
+            return
+
+        # Kunlik custom item limiti tekshiruvi
+        res   = await res_repo.get_or_create(user.house_id)
+        today = await purchase_repo.get_today(user_id, user.house_id)
+        if today.items + qty > res.item_buy_limit:
+            remaining = max(0, res.item_buy_limit - today.items)
+            await message.answer(
+                f"❌ <b>Kunlik custom item limiti oshib ketdi!</b>\n\n"
+                f"Kunlik limit: <b>{res.item_buy_limit}</b> ta\n"
+                f"Bugun sotib olingan: <b>{today.items}</b> ta\n"
+                f"Qolgan imkoniyat: <b>{remaining}</b> ta",
+                reply_markup=back_only_keyboard("market:back"),
+                parse_mode="HTML"
+            )
             await state.clear()
             return
 
@@ -364,6 +413,10 @@ async def _do_custom_purchase(message, bot, user_id: int, item_id: int, qty: int
 
         await custom_repo.add_user_item(user_id, item_id, qty)
         await custom_repo.add_house_item(user.house_id, item_id, qty)
+
+        # Kunlik custom item hisobini yangilash
+        await purchase_repo.add_purchase(user_id, user.house_id, items=qty)
+        await session.commit()
 
         # Qolgan stok
         stock_info = ""
