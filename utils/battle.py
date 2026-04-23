@@ -503,6 +503,184 @@ def calculate_battle(
     )
 
 
+async def resolve_garrison_battle(
+    attacker_name: str,
+    defender_region,
+    att_soldiers: int,
+    att_dragons: int,
+    att_scorpions: int,
+    session,
+) -> dict:
+    """
+    Tashqi urushda hujumchi avval hudud garnizoni bilan jangga kiradi.
+
+    Qaytaradi:
+    {
+        'garrison_exists': bool,
+        'garrison_defeated': bool,
+        'garrison_soldiers': int,   # jangdan oldingi garnizon
+        'garrison_dragons': int,
+        'garrison_scorpions': int,
+        'attacker_remaining': {'soldiers': int, 'dragons': int, 'scorpions': int},
+        'garrison_losses': {'soldiers': int, 'dragons': int, 'scorpions': int},
+        'attacker_losses': {'soldiers': int, 'dragons': int, 'scorpions': int},
+        'log': [str],               # jang log satrlari
+    }
+    """
+    from database.repositories import TerritoryGarrisonRepo
+
+    garrison_repo = TerritoryGarrisonRepo(session)
+    garrison = await garrison_repo.get_by_region(defender_region)
+
+    no_garrison = (
+        garrison is None
+        or (garrison.soldiers == 0 and garrison.dragons == 0 and garrison.scorpions == 0)
+    )
+
+    if no_garrison:
+        return {
+            'garrison_exists': False,
+            'garrison_defeated': True,
+            'garrison_soldiers': 0,
+            'garrison_dragons': 0,
+            'garrison_scorpions': 0,
+            'attacker_remaining': {
+                'soldiers': att_soldiers,
+                'dragons': att_dragons,
+                'scorpions': att_scorpions,
+            },
+            'garrison_losses': {'soldiers': 0, 'dragons': 0, 'scorpions': 0},
+            'attacker_losses': {'soldiers': 0, 'dragons': 0, 'scorpions': 0},
+            'log': [],
+        }
+
+    g_soldiers  = garrison.soldiers
+    g_dragons   = garrison.dragons
+    g_scorpions = garrison.scorpions
+
+    log = [
+        f"🏯 <b>GARNIZON JANGI — {defender_region.value}</b>\n"
+        f"🔴 {attacker_name}: {att_soldiers} askar | {att_dragons} ajdar | {att_scorpions} chayon\n"
+        f"🔵 Hudud Garnizoni: {g_soldiers} askar | {g_dragons} ajdar | {g_scorpions} chayon"
+    ]
+
+    # ─── Round 1: Ajdar vs Chayon ───────────────────────────────────────
+    # Hujumchi ajdarlari garnizon chayonlariga qarshi, garnizon ajdarlari hujumchi chayonlariga
+    remaining_att_dragons  = att_dragons
+    remaining_g_dragons    = g_dragons
+    remaining_att_scorpions = att_scorpions
+    remaining_g_scorpions   = g_scorpions
+
+    # Garnizon chayonlari hujumchi ajdarlarini uradi
+    for _ in range(remaining_g_scorpions):
+        if remaining_att_dragons <= 0:
+            break
+        remaining_att_dragons -= 1
+        remaining_g_scorpions -= 1
+
+    # Hujumchi chayonlari garnizon ajdarlarini uradi
+    for _ in range(remaining_att_scorpions):
+        if remaining_g_dragons <= 0:
+            break
+        remaining_g_dragons -= 1
+        remaining_att_scorpions -= 1
+
+    att_dragons_lost_r1  = att_dragons  - remaining_att_dragons
+    g_dragons_lost_r1    = g_dragons    - remaining_g_dragons
+    att_scorpions_used   = att_scorpions - remaining_att_scorpions
+    g_scorpions_used     = g_scorpions  - remaining_g_scorpions
+
+    log.append(
+        f"\n🏹 <b>1-Round: Ajdar vs Chayon</b>\n"
+        f"Garnizon -{g_dragons_lost_r1} ajdar | Hujumchi -{att_dragons_lost_r1} ajdar"
+    )
+
+    # ─── Round 2 + 3: Askar jang kuchi solishtirish ─────────────────────
+    # Soddalashtirilgan hisob: ajdar * DRAGON_KILLS_SOLDIERS + askarlar
+    DRAGON_K = 10  # settings dan olingan standart qiymat
+
+    att_power = att_soldiers + remaining_att_dragons * DRAGON_K
+    g_power   = g_soldiers   + remaining_g_dragons   * DRAGON_K
+
+    log.append(
+        f"\n⚔️ <b>2-3 Round: Kuch solishtirish</b>\n"
+        f"🔴 Hujumchi kuch: {att_power} | 🔵 Garnizon kuch: {g_power}"
+    )
+
+    garrison_defeated = att_power >= g_power
+
+    if garrison_defeated:
+        # Hujumchi yutdi — yo'qotmalar proporsional
+        if att_power + g_power > 0:
+            att_loss_ratio = g_power / (att_power + g_power) * 0.4
+        else:
+            att_loss_ratio = 0
+        att_soldiers_lost  = math.ceil(att_soldiers * att_loss_ratio)
+        att_dragons_lost   = att_dragons_lost_r1 + math.ceil(remaining_att_dragons * att_loss_ratio)
+        g_soldiers_lost    = g_soldiers
+        g_dragons_lost     = g_dragons_lost_r1 + remaining_g_dragons
+        log.append(f"🏆 <b>Hujumchi garnizonni yengdi!</b>")
+    else:
+        # Garnizon yutdi — hujumchi ko'proq yo'qotadi
+        if att_power + g_power > 0:
+            att_loss_ratio = g_power / (att_power + g_power) * 0.6
+        else:
+            att_loss_ratio = 0.5
+        att_soldiers_lost  = math.ceil(att_soldiers * att_loss_ratio)
+        att_dragons_lost   = att_dragons_lost_r1 + math.ceil(remaining_att_dragons * att_loss_ratio)
+        g_soldiers_lost    = math.ceil(g_soldiers * 0.2)   # garnizon ham oz yo'qotadi
+        g_dragons_lost     = g_dragons_lost_r1 + math.ceil(remaining_g_dragons * 0.1)
+        log.append(
+            f"🛡️ <b>Garnizon hujumchini to'xtatdi!</b>\n"
+            f"Hujumchi zo'rg'a chekinmoqda."
+        )
+
+    att_soldiers_lost  = min(att_soldiers_lost, att_soldiers)
+    att_dragons_lost   = min(att_dragons_lost, att_dragons)
+    g_soldiers_lost    = min(g_soldiers_lost, g_soldiers)
+    g_dragons_lost     = min(g_dragons_lost, g_dragons)
+
+    log.append(
+        f"\n📊 <b>Garnizon jangi yakuni</b>\n"
+        f"🔴 Hujumchi yo'qotdi: {att_soldiers_lost} askar | {att_dragons_lost} ajdar\n"
+        f"🔵 Garnizon yo'qotdi: {g_soldiers_lost} askar | {g_dragons_lost} ajdar\n"
+        f"Hujumchi qolgan: {att_soldiers - att_soldiers_lost} askar | "
+        f"{att_dragons - att_dragons_lost} ajdar"
+    )
+
+    # Garnizonni yangilash
+    await garrison_repo.apply_losses(
+        region=defender_region,
+        soldiers_lost=g_soldiers_lost,
+        dragons_lost=g_dragons_lost,
+        scorpions_lost=g_scorpions_used,
+    )
+
+    return {
+        'garrison_exists': True,
+        'garrison_defeated': garrison_defeated,
+        'garrison_soldiers': g_soldiers,
+        'garrison_dragons': g_dragons,
+        'garrison_scorpions': g_scorpions,
+        'attacker_remaining': {
+            'soldiers':  att_soldiers  - att_soldiers_lost,
+            'dragons':   att_dragons   - att_dragons_lost,
+            'scorpions': att_scorpions - att_scorpions_used,
+        },
+        'garrison_losses': {
+            'soldiers':  g_soldiers_lost,
+            'dragons':   g_dragons_lost,
+            'scorpions': g_scorpions_used,
+        },
+        'attacker_losses': {
+            'soldiers':  att_soldiers_lost,
+            'dragons':   att_dragons_lost,
+            'scorpions': att_scorpions_used,
+        },
+        'log': log,
+    }
+
+
 def calculate_surrender_loot(defender_gold: int, defender_soldiers: int, defender_dragons: int) -> dict:
     """Taslim bo'lish: 50% resursni berish"""
     return {
