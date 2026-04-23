@@ -62,6 +62,8 @@ class AdminState(StatesGroup):
     waiting_knight_max_soldiers = State()
     waiting_knight_daily_farm = State()
     waiting_knight_buy_limit = State()
+    # Pauza
+    waiting_pause_reason = State()
 
 
 # ─── BANK LIMIT — runtime o'zgaruvchilar ───
@@ -2390,5 +2392,71 @@ async def admin_knight_buy_limit_input(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
         f"✅ Ritsarning xarid limiti: <b>{val}</b> ta qilib belgilandi.",
+        parse_mode="HTML"
+    )
+
+
+# ─────────────────────────────────────────────────
+# BOSQICH 3 — O'YIN PAUZA BOSHQARUVI
+# ─────────────────────────────────────────────────
+
+@router.callback_query(F.data == "admin:toggle_pause")
+async def admin_toggle_pause(callback: CallbackQuery, state: FSMContext):
+    """O'yinni pauza / davom ettirish"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        current = await cfg.get("game_paused") or "false"
+
+        if current.strip().lower() == "true":
+            # Pauzani ochish
+            await cfg.set("game_paused", "false")
+            await cfg.set("pause_reason", "")
+            await session.commit()
+            await callback.answer("▶️ O'yin davom ettirildi.", show_alert=True)
+            await callback.message.edit_text(
+                "▶️ <b>O'yin qayta ishga tushirildi.</b>\n\n"
+                "Foydalanuvchilar endi botdan foydalana oladi.",
+                parse_mode="HTML",
+                reply_markup=admin_keyboard()
+            )
+        else:
+            # Pauza sababi so'rash
+            await state.set_state(AdminState.waiting_pause_reason)
+            await callback.answer()
+            await callback.message.answer(
+                "⏸ <b>O'yinni to'xtatish</b>\n\n"
+                "Pauza sababini yozing — foydalanuvchilarga ko'rsatiladi.\n"
+                "(Masalan: <i>Texnik yangilanish olib borilmoqda</i>)",
+                parse_mode="HTML"
+            )
+
+
+@router.message(AdminState.waiting_pause_reason)
+async def admin_pause_reason_input(message: Message, state: FSMContext):
+    """Pauza sababini qabul qilish va o'yinni to'xtatish"""
+    if not is_admin(message.from_user.id):
+        return
+
+    reason = message.text.strip()
+    if not reason:
+        await message.answer("❌ Sabab bo'sh bo'lishi mumkin emas.")
+        return
+
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        await cfg.set("game_paused", "true")
+        await cfg.set("pause_reason", reason)
+        await session.commit()
+
+    await state.clear()
+    await message.answer(
+        f"⏸ <b>O'yin to'xtatildi!</b>\n\n"
+        f"📌 Sabab: <i>{reason}</i>\n\n"
+        f"Foydalanuvchilar bu xabarni ko'radi.\n"
+        f"Qayta yoqish uchun: Admin Panel → ⏸ O'yinni Pauza/Davom",
         parse_mode="HTML"
     )
