@@ -9,13 +9,22 @@ Hukmdorlik Da'vosi Mexanikasi
 6. Barcha urushlar tugagach — da'vogar HIGH_LORD bo'ladi
 """
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import (
+    Message, CallbackQuery,
+    InlineKeyboardMarkup, InlineKeyboardButton,
+)
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from datetime import datetime, timedelta
 from sqlalchemy import select
 
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo, WarRepo, HukmdorClaimRepo, ChronicleRepo
+from database.repositories import (
+    UserRepo, HouseRepo, WarRepo,
+    HukmdorClaimRepo, ChronicleRepo,
+    TerritoryGarrisonRepo,
+)
 from database.models import (
     RoleEnum, WarTypeEnum, ClaimStatusEnum,
     HukmdorClaim, HukmdorClaimResponse, War, WarStatusEnum
@@ -27,6 +36,14 @@ import logging
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────
+# BOSQICH 8 — FSM States
+# ─────────────────────────────────────────────
+
+class VassalState(StatesGroup):
+    waiting_troop_amount = State()  # Vassal nechta askar yuborishini so'raydi
 
 
 def _claim_response_keyboard(claim_id: int):
@@ -390,3 +407,219 @@ async def check_claim_wars_ended(bot, session):
                 f"⚔️ Qilich bilan hokimiyat qo'lga kiritildi."
             )
             await post_to_chronicle(bot, text)
+
+
+# ═══════════════════════════════════════════════════════════════
+# BOSQICH 8 — Hukmdorlik Paneli va Vassal Askar So'rash
+# ═══════════════════════════════════════════════════════════════
+
+@router.callback_query(F.data == "claim:panel")
+async def hukmdor_claim_panel(callback: CallbackQuery):
+    """Hukmdorlik paneli — faqat HIGH_LORD uchun"""
+    try:
+        async with AsyncSessionFactory() as session:
+            user_repo     = UserRepo(session)
+            house_repo    = HouseRepo(session)
+            garrison_repo = TerritoryGarrisonRepo(session)
+
+            user = await user_repo.get_by_id(callback.from_user.id)
+            if not user or user.role != RoleEnum.HIGH_LORD:
+                await callback.answer("❌ Faqat Hukmdor uchun.", show_alert=True)
+                return
+
+            vassal_houses       = await house_repo.get_vassals_by_hukmdor(user.house_id)
+            total_vassal_soldiers = sum(h.total_soldiers for h in vassal_houses)
+
+            garrison            = await garrison_repo.get_by_region(user.region)
+            garrison_soldiers   = garrison.soldiers if garrison else 0
+
+        half_vassal     = total_vassal_soldiers // 2
+        rebellion_safe  = garrison_soldiers >= half_vassal
+
+        text = (
+            f"👑 <b>Hukmdorlik Paneli — {user.region.value}</b>\n\n"
+            f"🏰 Vassal xonadonlar: <b>{len(vassal_houses)}</b>\n"
+            f"⚔️ Jami vassal qo'shini: <b>{total_vassal_soldiers}</b>\n"
+            f"🏯 Hududdagi garnizon: <b>{garrison_soldiers}</b>\n\n"
+            f"{'✅ Isyon xavfi yo\'q' if rebellion_safe else '⚠️ Isyon xavfi bor! Garnizonni kuchaytiring.'}\n"
+            f"<i>(Garnizon ≥ vassal qo'shini yarmi bo'lsa — isyon bo'lmaydi)</i>"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏯 Hudud Boshqaruvi",    callback_data="territory:manage")],
+            [InlineKeyboardButton(text="⚔️ Vassal Askar So'rash", callback_data="claim:request_troops")],
+            [InlineKeyboardButton(text="🔙 Bosh menyu",           callback_data="main:menu")],
+        ])
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+    except Exception as e:
+        logger.exception("hukmdor_claim_panel xatosi: %s", e)
+        await callback.answer("❌ Texnik xato yuz berdi.", show_alert=True)
+
+
+@router.callback_query(F.data == "claim:request_troops")
+async def request_vassal_troops(callback: CallbackQuery):
+    """Hukmdor vassal xonadonlardan askar so'raydi"""
+    try:
+        async with AsyncSessionFactory() as session:
+            user_repo  = UserRepo(session)
+            house_repo = HouseRepo(session)
+
+            user     = await user_repo.get_by_id(callback.from_user.id)
+            if not user or user.role != RoleEnum.HIGH_LORD:
+                await callback.answer("❌ Faqat Hukmdor uchun.", show_alert=True)
+                return
+
+            my_house      = await house_repo.get_by_id(user.house_id)
+            vassal_houses = await house_repo.get_vassals_by_hukmdor(user.house_id)
+
+        if not vassal_houses:
+            await callback.answer("❌ Vassal xonadonlaringiz yo'q.", show_alert=True)
+            return
+
+        sent_count = 0
+        for vassal in vassal_houses:
+            if not vassal.lord_id:
+                continue
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(
+                    text="✅ Askar beraman",
+                    callback_data=f"vassal:troops:accept:{my_house.id}"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Rad etaman",
+                    callback_data=f"vassal:troops:reject:{my_house.id}"
+                ),
+            ]])
+            try:
+                await callback.bot.send_message(
+                    vassal.lord_id,
+                    f"👑 <b>{my_house.name}</b> (Hukmdor) sizdan askar so'ramoqda!\n\n"
+                    f"Nechta askar yuborasiz?",
+                    reply_markup=kb,
+                    parse_mode="HTML"
+                )
+                sent_count += 1
+            except Exception:
+                pass
+
+        await callback.answer(
+            f"✅ So'rov {sent_count} ta vassalga yuborildi." if sent_count
+            else "⚠️ Hech bir vassalga yubora olmadi.",
+            show_alert=True
+        )
+
+    except Exception as e:
+        logger.exception("request_vassal_troops xatosi: %s", e)
+        await callback.answer("❌ Texnik xato yuz berdi.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("vassal:troops:"))
+async def vassal_troops_response(callback: CallbackQuery, state: FSMContext):
+    """Vassal askar so'roviga javob beradi"""
+    try:
+        parts            = callback.data.split(":")   # vassal troops accept/reject hukmdor_house_id
+        decision         = parts[2]
+        hukmdor_house_id = int(parts[3])
+
+        if decision == "reject":
+            await callback.message.edit_text("❌ Askar so'rovini rad etdingiz.")
+            # Hukmdorga xabar
+            async with AsyncSessionFactory() as session:
+                house_repo = HouseRepo(session)
+                user_repo  = UserRepo(session)
+                hukmdor_house = await house_repo.get_by_id(hukmdor_house_id)
+                user = await user_repo.get_by_id(callback.from_user.id)
+                my_house = await house_repo.get_by_id(user.house_id) if user and user.house_id else None
+
+            if hukmdor_house and hukmdor_house.lord_id:
+                try:
+                    await callback.bot.send_message(
+                        hukmdor_house.lord_id,
+                        f"❌ <b>{my_house.name if my_house else 'Vassal'}</b> askar so'rovingizni rad etdi.",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+            return
+
+        # Qabul — nechta askar yuborish so'raladi
+        await state.update_data(troop_request_house=hukmdor_house_id)
+        await state.set_state(VassalState.waiting_troop_amount)
+        await callback.message.edit_text(
+            "✅ Nechta askar yubormoqchisiz?\n"
+            "<i>(Raqam kiriting, 0 — askar yubormaslik)</i>",
+            parse_mode="HTML"
+        )
+
+    except Exception as e:
+        logger.exception("vassal_troops_response xatosi: %s", e)
+        await callback.answer("❌ Texnik xato yuz berdi.", show_alert=True)
+
+
+@router.message(VassalState.waiting_troop_amount)
+async def vassal_troops_send(message: Message, state: FSMContext):
+    """Vassal askar miqdorini kiritadi va xonadonlar o'rtasida ko'chiradi"""
+    try:
+        amount = int(message.text.strip())
+        if amount < 0:
+            raise ValueError
+    except (ValueError, AttributeError):
+        await message.answer("❌ 0 yoki undan katta son kiriting.")
+        return
+
+    data             = await state.get_data()
+    hukmdor_house_id = data.get("troop_request_house")
+
+    if amount == 0:
+        await state.clear()
+        await message.answer("ℹ️ Askar yubormadingiz.")
+        return
+
+    try:
+        async with AsyncSessionFactory() as session:
+            user_repo  = UserRepo(session)
+            house_repo = HouseRepo(session)
+
+            user     = await user_repo.get_by_id(message.from_user.id)
+            if not user or not user.house_id:
+                await message.answer("❌ Xonadoningiz topilmadi.")
+                await state.clear()
+                return
+
+            my_house      = await house_repo.get_by_id(user.house_id)
+            hukmdor_house = await house_repo.get_by_id(hukmdor_house_id)
+
+            if amount > my_house.total_soldiers:
+                await message.answer(
+                    f"❌ Yetarli askar yo'q.\n"
+                    f"Sizda: <b>{my_house.total_soldiers}</b> askar.",
+                    parse_mode="HTML"
+                )
+                return
+
+            # Vassaldan ayirish, hukmdorga qo'shish
+            await house_repo.update_military(my_house.id,    soldiers=-amount)
+            await house_repo.update_military(hukmdor_house_id, soldiers=+amount)
+            await session.commit()
+
+        await state.clear()
+        await message.answer(
+            f"✅ <b>{amount}</b> askar <b>{hukmdor_house.name}</b> ga yuborildi.",
+            parse_mode="HTML"
+        )
+
+        # Hukmdorga xabar
+        if hukmdor_house and hukmdor_house.lord_id:
+            try:
+                await message.bot.send_message(
+                    hukmdor_house.lord_id,
+                    f"⚔️ <b>{my_house.name}</b> vassalingiz <b>{amount}</b> askar yubordi!",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+    except Exception as e:
+        logger.exception("vassal_troops_send xatosi: %s", e)
+        await state.clear()
+        await message.answer("❌ Texnik xato yuz berdi. Qaytadan urinib ko'ring.")
