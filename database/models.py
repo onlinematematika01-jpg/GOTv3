@@ -548,6 +548,11 @@ class HouseResources(Base):
     # Kunlik farm: askar miqdori
     daily_farm_amount = Column(Integer, default=50)
 
+    # Kunlik sotib olish limitlari
+    dragon_buy_limit   = Column(Integer, default=10)   # Kunlik ajdar
+    scorpion_buy_limit = Column(Integer, default=10)   # Kunlik chayon
+    item_buy_limit     = Column(Integer, default=50)   # Kunlik custom item (jami)
+
     updated_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     house = relationship("House", foreign_keys=[house_id])
@@ -574,3 +579,20 @@ class TerritoryGarrison(Base):
     updated_at       = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     hukmdor_house = relationship("House", foreign_keys=[hukmdor_house_id])
+
+
+class DailyPurchase(Base):
+    """Foydalanuvchining bugungi xaridlari"""
+    __tablename__ = "daily_purchases"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    user_id    = Column(BigInteger, ForeignKey("users.id"), nullable=False)
+    house_id   = Column(Integer, ForeignKey("houses.id"), nullable=False)
+    date       = Column(DateTime, nullable=False)  # UTC kun (faqat sana, vaqt emas)
+    soldiers   = Column(Integer, default=0)
+    dragons    = Column(Integer, default=0)
+    scorpions  = Column(Integer, default=0)
+    items      = Column(Integer, default=0)  # jami custom item soni
+
+    user  = relationship("User",  foreign_keys=[user_id])
+    house = relationship("House", foreign_keys=[house_id])
