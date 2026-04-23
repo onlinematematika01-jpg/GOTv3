@@ -1025,6 +1025,35 @@ class CustomItemRepo:
                 self.session.add(row)
         await self.session.commit()
 
+    async def set_house_item_qty(self, house_id: int, item_id: int, qty: int) -> None:
+        """
+        Xonadon custom item miqdorini to'g'ridan belgilaydi (delta emas, set).
+        qty=0 bo'lsa yozuv 0 ga tushiriladi (o'chirilmaydi — tarix saqlansin).
+        """
+        from database.models import HouseCustomItem
+        qty = max(0, qty)
+        result = await self.session.execute(
+            select(HouseCustomItem).where(
+                HouseCustomItem.house_id == house_id,
+                HouseCustomItem.item_id  == item_id,
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row:
+            row.quantity = qty
+        else:
+            row = HouseCustomItem(house_id=house_id, item_id=item_id, quantity=qty)
+            self.session.add(row)
+        await self.session.flush()
+
+    async def get_all_items(self):
+        """Barcha aktiv custom itemlarni qaytaradi"""
+        from database.models import CustomItem
+        result = await self.session.execute(
+            select(CustomItem).where(CustomItem.is_active == True)
+        )
+        return result.scalars().all()
+
     async def get_house_items_with_info(self, house_id: int):
         """House itemlarini CustomItem ma'lumotlari bilan birga qaytaradi"""
         from database.models import HouseCustomItem, CustomItem
