@@ -66,6 +66,9 @@ class AdminState(StatesGroup):
     waiting_pause_reason = State()
     # Xonadon resurslari tahrirlash
     waiting_house_resource_value = State()
+    # Bozor stok limiti
+    waiting_stock_item  = State()
+    waiting_stock_value = State()
 
 
 # ─── BANK LIMIT — runtime o'zgaruvchilar ───
@@ -119,39 +122,84 @@ async def admin_back(callback: CallbackQuery):
     await callback.answer()
     await callback.message.edit_text(text, reply_markup=admin_keyboard(), parse_mode="HTML")
 
+# ─── Bozor narx+stok panel yordamchi funksiyalari ──────────────────────────
+
+_MARKET_ITEMS = {
+    "soldier":  "🗡️ Askar",
+    "dragon":   "🐉 Ajdar",
+    "scorpion": "🏹 Skorpion",
+}
+
+_STOCK_KEYS = {
+    "soldier":  "soldier_stock",
+    "dragon":   "dragon_stock",
+    "scorpion": "scorpion_stock",
+}
+
+
+async def _prices_text() -> str:
+    async with AsyncSessionFactory() as session:
+        market_repo = MarketRepo(session)
+        cfg = BotSettingsRepo(session)
+        prices = await market_repo.get_all_prices()
+        stocks = {}
+        for item, key in _STOCK_KEYS.items():
+            val = await cfg.get(key)
+            stocks[item] = int(val) if val else None
+
+    lines = ["💰 <b>Bozor: Narx va Stok</b>\n"]
+    for item, label in _MARKET_ITEMS.items():
+        stok = f"{stocks[item]:,}" if stocks[item] is not None else "♾ cheksiz"
+        lines.append(f"{label}: narx <b>{prices.get(item, '—')}</b> | stok <b>{stok}</b>")
+    return "\n".join(lines)
+
+
+def _prices_keyboard() -> InlineKeyboardMarkup:
+    rows = []
+    for item, label in _MARKET_ITEMS.items():
+        rows.append([
+            InlineKeyboardButton(
+                text=f"{label} narx",
+                callback_data=f"admin:price:set:{item}"
+            ),
+            InlineKeyboardButton(
+                text=f"{label} stok",
+                callback_data=f"admin:stock:set:{item}"
+            ),
+        ])
+    rows.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @router.callback_query(F.data == "admin:prices")
 async def admin_prices_menu(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
         return
-
-    async with AsyncSessionFactory() as session:
-        market_repo = MarketRepo(session)
-        prices = await market_repo.get_all_prices()
-
-    await state.set_state(AdminState.waiting_price_item)
+    await state.clear()
     await callback.answer()
-    await callback.message.answer(
-        f"💰 <b>Narxlarni o'zgartirish</b>\n\n"
-        f"Joriy narxlar:\n"
-        f"• soldier: {prices.get('soldier', 1)}\n"
-        f"• dragon: {prices.get('dragon', 150)}\n"
-        f"• scorpion: {prices.get('scorpion', 25)}\n\n"
-        f"Qaysi tovar? (soldier / dragon / scorpion):"
-    )
+    text = await _prices_text()
+    await callback.message.answer(text, reply_markup=_prices_keyboard(), parse_mode="HTML")
 
 
-@router.message(AdminState.waiting_price_item)
-async def admin_price_item(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
+# ── Narx o'zgartirish ────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("admin:price:set:"))
+async def admin_price_select(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
         return
-    item = message.text.strip().lower()
-    if item not in ["soldier", "dragon", "scorpion"]:
-        await message.answer("❌ Noto'g'ri tovar nomi.")
+    item = callback.data.split(":")[-1]
+    if item not in _MARKET_ITEMS:
+        await callback.answer("❌ Noma'lum tovar.", show_alert=True)
         return
     await state.update_data(price_item=item)
     await state.set_state(AdminState.waiting_price_value)
-    await message.answer(f"✏️ {item} uchun yangi narxni kiriting:")
+    await callback.answer()
+    await callback.message.answer(
+        f"✏️ <b>{_MARKET_ITEMS[item]}</b> uchun yangi <b>narx</b>ni kiriting (musbat son):",
+        parse_mode="HTML"
+    )
 
 
 @router.message(AdminState.waiting_price_value)
@@ -173,8 +221,68 @@ async def admin_price_value(message: Message, state: FSMContext):
         market_repo = MarketRepo(session)
         await market_repo.set_price(item, new_price)
 
-    await message.answer(f"✅ {item} narxi {new_price} tangaga o'zgartirildi!")
     await state.clear()
+    text = await _prices_text()
+    await message.answer(
+        f"✅ <b>{_MARKET_ITEMS[item]}</b> narxi <b>{new_price:,}</b> tangaga o'zgartirildi!\n\n" + text,
+        reply_markup=_prices_keyboard(),
+        parse_mode="HTML"
+    )
+
+
+# ── Stok limiti o'zgartirish ─────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("admin:stock:set:"))
+async def admin_stock_select(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    item = callback.data.split(":")[-1]
+    if item not in _MARKET_ITEMS:
+        await callback.answer("❌ Noma'lum tovar.", show_alert=True)
+        return
+    await state.update_data(stock_item=item)
+    await state.set_state(AdminState.waiting_stock_value)
+    await callback.answer()
+    await callback.message.answer(
+        f"📦 <b>{_MARKET_ITEMS[item]}</b> uchun <b>stok limitini</b> kiriting.\n"
+        f"<i>Cheksiz qilish uchun 0 yozing.</i>",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_stock_value)
+async def admin_stock_value(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        val = int(message.text.strip())
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ 0 yoki undan katta son kiriting.")
+        return
+
+    data = await state.get_data()
+    item = data.get("stock_item")
+    if not item:
+        await state.clear()
+        return
+
+    db_key = _STOCK_KEYS[item]
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        # 0 = cheksiz (None ga teng)
+        await cfg.set(db_key, str(val) if val > 0 else "")
+
+    await state.clear()
+    stok_label = f"{val:,}" if val > 0 else "♾ cheksiz"
+    text = await _prices_text()
+    await message.answer(
+        f"✅ <b>{_MARKET_ITEMS[item]}</b> stoki <b>{stok_label}</b> ga o'zgartirildi!\n\n" + text,
+        reply_markup=_prices_keyboard(),
+        parse_mode="HTML"
+    )
 
 
 # ─── BANK FOIZ ─────────────────────────────────────────────────────────────
