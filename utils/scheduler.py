@@ -2,7 +2,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from aiogram import Bot
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo, WarRepo, IronBankRepo, ChronicleRepo
+from database.repositories import UserRepo, HouseRepo, WarRepo, IronBankRepo, ChronicleRepo, DailyPurchaseRepo
 from database.models import RoleEnum, WarStatusEnum
 from sqlalchemy import select, update
 from database.models import User, House
@@ -1179,6 +1179,15 @@ async def reload_farm_jobs(bot):
         logger.info(f"Farm job qayta yuklandi #{i}: {sched['hour']:02d}:{sched['minute']:02d} Tashkent — {sched['amount']} tanga")
 
 
+async def reset_daily_purchases_job():
+    """Har kuni 00:00 da barcha kunlik xaridlarni nollaydi (daily_purchases jadvalini tozalaydi)."""
+    async with AsyncSessionFactory() as session:
+        purchase_repo = DailyPurchaseRepo(session)
+        count = await purchase_repo.reset_all()
+        await session.commit()
+    logger.info(f"Kunlik xaridlar nollanди: {count} ta yozuv yangilandi.")
+
+
 async def setup_scheduler(scheduler: AsyncIOScheduler, bot: Bot):
     # Kunlik farm — DB dan dinamik jadval o'qish
     async with AsyncSessionFactory() as session:
@@ -1267,7 +1276,27 @@ async def setup_scheduler(scheduler: AsyncIOScheduler, bot: Bot):
     )
     logger.info(f"Deposit job: har kuni {dep_hour:02d}:{dep_minute:02d} Tashkent")
 
+    # Kunlik xaridlarni nollash — har kuni 00:00 Toshkent
+    scheduler.add_job(
+        reset_daily_purchases_job,
+        CronTrigger(hour=0, minute=0, timezone="Asia/Tashkent"),
+        id="daily_purchase_reset",
+        replace_existing=True,
+    )
+    logger.info("Daily purchase reset job: har kuni 00:00 Tashkent")
+
     logger.info("Scheduler jobs o'rnatildi")
+
+
+async def reset_daily_purchases_job():
+    """Har kuni 00:00 da barcha kunlik xaridlarni nollaydi (DailyPurchase jadvalini tozalaydi)"""
+    from database.engine import AsyncSessionFactory
+    from database.repositories import DailyPurchaseRepo
+    async with AsyncSessionFactory() as session:
+        repo = DailyPurchaseRepo(session)
+        count = await repo.reset_all()
+        await session.commit()
+    logger.info(f"Kunlik xaridlar nollandi: {count} yozuv")
 
 
 async def check_civil_wars_job(bot: Bot):
