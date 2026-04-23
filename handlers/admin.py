@@ -2469,20 +2469,26 @@ async def admin_pause_reason_input(message: Message, state: FSMContext):
 # ─────────────────────────────────────────────────
 
 _HRES_FIELDS = {
-    "market":   ("market_buy_limit",  "🛒 Bozor kunlik askar limiti"),
-    "bank_min": ("bank_min_loan",     "🏦 Bank minimum qarz"),
-    "bank_max": ("bank_max_loan",     "🏦 Bank maksimum qarz"),
-    "farm":     ("daily_farm_amount", "🌾 Kunlik farm miqdori (askar)"),
+    "market":        ("market_buy_limit",   "🛒 Bozor kunlik askar limiti"),
+    "bank_min":      ("bank_min_loan",      "🏦 Bank minimum qarz"),
+    "bank_max":      ("bank_max_loan",      "🏦 Bank maksimum qarz"),
+    "farm":          ("daily_farm_amount",  "🌾 Kunlik farm miqdori (askar)"),
+    "dragon_limit":  ("dragon_buy_limit",   "🐉 Kunlik ajdar sotib olish limiti"),
+    "scorpion_limit":("scorpion_buy_limit", "🏹 Kunlik skorpion sotib olish limiti"),
+    "item_limit":    ("item_buy_limit",     "⚔️ Kunlik custom item sotib olish limiti"),
 }
 
 
 def _hres_keyboard(house_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🛒 Bozor limiti",  callback_data=f"admin:hres:edit:market:{house_id}")],
-        [InlineKeyboardButton(text="🏦 Bank min",      callback_data=f"admin:hres:edit:bank_min:{house_id}")],
-        [InlineKeyboardButton(text="🏦 Bank max",      callback_data=f"admin:hres:edit:bank_max:{house_id}")],
-        [InlineKeyboardButton(text="🌾 Kunlik farm",   callback_data=f"admin:hres:edit:farm:{house_id}")],
-        [InlineKeyboardButton(text="🔙 Orqaga",        callback_data="admin:house_resources")],
+        [InlineKeyboardButton(text="🛒 Bozor limiti",       callback_data=f"admin:hres:edit:market:{house_id}")],
+        [InlineKeyboardButton(text="🏦 Bank min",           callback_data=f"admin:hres:edit:bank_min:{house_id}")],
+        [InlineKeyboardButton(text="🏦 Bank max",           callback_data=f"admin:hres:edit:bank_max:{house_id}")],
+        [InlineKeyboardButton(text="🌾 Kunlik farm",        callback_data=f"admin:hres:edit:farm:{house_id}")],
+        [InlineKeyboardButton(text="🐉 Ajdar limiti",       callback_data=f"admin:hres:edit:dragon_limit:{house_id}")],
+        [InlineKeyboardButton(text="🏹 Skorpion limiti",    callback_data=f"admin:hres:edit:scorpion_limit:{house_id}")],
+        [InlineKeyboardButton(text="⚔️ Custom item limiti", callback_data=f"admin:hres:edit:item_limit:{house_id}")],
+        [InlineKeyboardButton(text="🔙 Orqaga",             callback_data="admin:house_resources")],
     ])
 
 
@@ -2534,6 +2540,9 @@ async def admin_house_resources_select(callback: CallbackQuery):
         f"🏦 Bank min qarz: <b>{res.bank_min_loan:,}</b>\n"
         f"🏦 Bank max qarz: <b>{res.bank_max_loan:,}</b>\n"
         f"🌾 Kunlik farm (askar): <b>{res.daily_farm_amount}</b>\n"
+        f"🐉 Kunlik ajdar limiti: <b>{res.dragon_buy_limit}</b>\n"
+        f"🏹 Kunlik skorpion limiti: <b>{res.scorpion_buy_limit}</b>\n"
+        f"⚔️ Kunlik custom item limiti: <b>{res.item_buy_limit}</b>\n"
     )
     await callback.answer()
     await callback.message.edit_text(
