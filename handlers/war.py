@@ -327,6 +327,30 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
             await state.clear()
             return
 
+        # BOSQICH 9 — Vassal hukmdorga urush ochmoqchi bo'lsa garnizon tekshiriladi
+        if (
+            attacker.is_under_occupation
+            and attacker.occupier_house_id == defender.id
+        ):
+            from database.repositories import TerritoryGarrisonRepo
+            garrison_repo = TerritoryGarrisonRepo(session)
+            attacker_user = await user_repo.get_by_id(callback.from_user.id)
+            if attacker_user and attacker_user.region:
+                garrison = await garrison_repo.get_by_region(attacker_user.region)
+                if garrison and garrison.soldiers > 0:
+                    all_vassals = await house_repo.get_vassals_by_hukmdor(defender.id)
+                    total_vassal_soldiers = sum(h.total_soldiers for h in all_vassals)
+                    if garrison.soldiers >= total_vassal_soldiers // 2:
+                        await callback.answer(
+                            f"⛓️ Hukmdorga qarshi urush ocholmaysiz!\n"
+                            f"Hudud garnizoni ({garrison.soldiers} askar) barcha vassallarning "
+                            f"qo'shini yarmidan ko'p.\n"
+                            f"Isyon mexanikasidan foydalaning.",
+                            show_alert=True
+                        )
+                        await state.clear()
+                        return
+
         grace_ends = datetime.utcnow() + timedelta(minutes=settings.GRACE_PERIOD_MINUTES)
 
         # Xavfsizlik: grace period har qanday holatda 23:00 (mahalliy) dan oshmasin
