@@ -7,7 +7,7 @@ from aiogram.filters import Command
 from database.engine import AsyncSessionFactory
 from database.repositories import UserRepo, HouseRepo, MarketRepo, BotSettingsRepo, HouseResourcesRepo
 from database.models import RoleEnum, RegionEnum, House
-from keyboards import admin_keyboard, back_only_keyboard
+from keyboards import admin_keyboard, back_only_keyboard, house_list_keyboard
 from config.settings import settings
 from sqlalchemy import select, update, delete, text
 from sqlalchemy.orm import selectinload
