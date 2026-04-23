@@ -1,12 +1,13 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, and_, or_
 from sqlalchemy.orm import selectinload
+import datetime
 from database.models import (
     User, House, Alliance, War, IronBankLoan,
     InternalMessage, Chronicle, MarketPrice,
     RoleEnum, RegionEnum, WarStatusEnum,
     AllianceGroup, AllianceGroupMember, AllianceGroupInvite,
-    HouseResources, TerritoryGarrison,
+    HouseResources, TerritoryGarrison, DailyPurchase,
 )
 from typing import Optional, List
 import math
@@ -1797,9 +1798,13 @@ class HouseResourcesRepo:
         """
         Xonadon resurs sozlamalarini yangilaydi.
         Ruxsat etilgan maydonlar: market_buy_limit, bank_min_loan,
-        bank_max_loan, daily_farm_amount.
+        bank_max_loan, daily_farm_amount, dragon_buy_limit,
+        scorpion_buy_limit, item_buy_limit.
         """
-        allowed = {"market_buy_limit", "bank_min_loan", "bank_max_loan", "daily_farm_amount"}
+        allowed = {
+            "market_buy_limit", "bank_min_loan", "bank_max_loan",
+            "daily_farm_amount", "dragon_buy_limit", "scorpion_buy_limit", "item_buy_limit"
+        }
         filtered = {k: v for k, v in kwargs.items() if k in allowed}
         if not filtered:
             raise ValueError(f"Hech qanday to'g'ri maydon yo'q: {list(kwargs.keys())}")
@@ -1921,3 +1926,71 @@ class TerritoryGarrisonRepo:
             "dragons":   garrison.dragons,
             "scorpions": garrison.scorpions,
         }
+
+
+class DailyPurchaseRepo:
+    """
+    Foydalanuvchining bugungi bozor xaridlarini kuzatadi.
+    Har kuni 00:00 da scheduler tomonidan reset_all() chaqiriladi.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    def _today_utc(self) -> datetime.datetime:
+        """Bugungi sana, vaqtsiz (00:00:00 UTC)"""
+        today = datetime.datetime.utcnow().date()
+        return datetime.datetime(today.year, today.month, today.day)
+
+    async def get_today(self, user_id: int, house_id: int) -> DailyPurchase:
+        """Bugungi xarid yozuvini qaytaradi; yo'q bo'lsa yangi bo'sh yozuv yaratadi."""
+        today = self._today_utc()
+        result = await self.session.execute(
+            select(DailyPurchase).where(
+                DailyPurchase.user_id == user_id,
+                DailyPurchase.house_id == house_id,
+                DailyPurchase.date == today,
+            )
+        )
+        record = result.scalar_one_or_none()
+        if record is None:
+            record = DailyPurchase(
+                user_id=user_id,
+                house_id=house_id,
+                date=today,
+                soldiers=0,
+                dragons=0,
+                scorpions=0,
+                items=0,
+            )
+            self.session.add(record)
+            await self.session.flush()
+        return record
+
+    async def add_purchase(
+        self,
+        user_id: int,
+        house_id: int,
+        soldiers: int = 0,
+        dragons: int = 0,
+        scorpions: int = 0,
+        items: int = 0,
+    ) -> DailyPurchase:
+        """Bugungi xarid miqdorlarini oshiradi."""
+        record = await self.get_today(user_id, house_id)
+        record.soldiers  += soldiers
+        record.dragons   += dragons
+        record.scorpions += scorpions
+        record.items     += items
+        await self.session.flush()
+        return record
+
+    async def reset_all(self) -> int:
+        """Barcha kunlik xarid yozuvlarini o'chiradi (scheduler tomonidan chaqiriladi)."""
+        result = await self.session.execute(
+            update(DailyPurchase).values(
+                soldiers=0, dragons=0, scorpions=0, items=0
+            )
+        )
+        await self.session.flush()
+        return result.rowcount
