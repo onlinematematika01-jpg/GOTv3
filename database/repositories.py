@@ -173,6 +173,16 @@ class HouseRepo:
         )
         await self.session.commit()
 
+    async def get_vassals_by_hukmdor(self, hukmdor_house_id: int) -> List[House]:
+        """Hukmdorga bo'ysunuvchi barcha vassal xonadonlarini qaytaradi"""
+        result = await self.session.execute(
+            select(House).where(
+                House.is_under_occupation == True,
+                House.occupier_house_id == hukmdor_house_id,
+            )
+        )
+        return result.scalars().all()
+
 
 class WarRepo:
     def __init__(self, session: AsyncSession):
