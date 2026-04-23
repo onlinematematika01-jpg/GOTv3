@@ -223,6 +223,26 @@ async def _do_purchase(message, bot, user_id: int, item: str, qty: int, state: F
                 await state.clear()
                 return
 
+        # Global stok limiti tekshiruvi (BotSettings dan)
+        from database.repositories import BotSettingsRepo as _BSR
+        _stock_keys = {"soldier": "soldier_stock", "dragon": "dragon_stock", "scorpion": "scorpion_stock"}
+        async with AsyncSessionFactory() as _ss:
+            _cfg = _BSR(_ss)
+            _stock_raw = await _cfg.get(_stock_keys[item])
+            _stock_limit = int(_stock_raw) if _stock_raw else None
+
+        if _stock_limit is not None and _stock_limit < qty:
+            _item_labels = {"soldier": "🗡️ Askar", "dragon": "🐉 Ajdar", "scorpion": "🏹 Skorpion"}
+            await message.answer(
+                f"❌ <b>Stokda yetarli miqdor yo'q!</b>\n\n"
+                f"{_item_labels[item]}: stokda qolgan <b>{_stock_limit:,}</b> ta\n"
+                f"So'raldigan: <b>{qty:,}</b> ta",
+                reply_markup=back_only_keyboard("market:back"),
+                parse_mode="HTML"
+            )
+            await state.clear()
+            return
+
         price = await market_repo.get_price(item)
         total_cost = price * qty
 
@@ -258,6 +278,14 @@ async def _do_purchase(message, bot, user_id: int, item: str, qty: int, state: F
         _pk = {"soldier": "soldiers", "dragon": "dragons", "scorpion": "scorpions"}
         await purchase_repo.add_purchase(user_id, user.house_id, **{_pk[item]: qty})
         await session.commit()
+
+        # Global stokni kamaytirish (agar limit o'rnatilgan bo'lsa)
+        if _stock_limit is not None:
+            from database.repositories import BotSettingsRepo as _BSR2
+            new_stock = max(0, _stock_limit - qty)
+            async with AsyncSessionFactory() as _ss2:
+                _cfg2 = _BSR2(_ss2)
+                await _cfg2.set(_stock_keys[item], str(new_stock) if new_stock > 0 else "")
 
         item_label = ITEM_NAMES.get(item, item)
         await message.answer(
