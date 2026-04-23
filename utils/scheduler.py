@@ -693,6 +693,90 @@ async def _run_war_v2(war, bot, session):
     att_proxy = _HouseProxy(attacker, att_soldiers, att_dragons, att_scorpions)
     def_proxy = _HouseProxy(defender, def_soldiers, def_dragons, def_scorpions)
 
+    # ── Tashqi urush: garnizon birinchi jangga kiradi ─────────────────
+    # Tashqi urush = attacker va defender turli regionda
+    from utils.battle import resolve_garrison_battle
+    is_external_war = (attacker.region != defender.region)
+
+    garrison_log_lines = []
+    if is_external_war:
+        garrison_result = await resolve_garrison_battle(
+            attacker_name  = attacker.name,
+            defender_region= defender.region,
+            att_soldiers   = att_soldiers,
+            att_dragons    = att_dragons,
+            att_scorpions  = att_scorpions,
+            session        = session,
+        )
+
+        if garrison_result['garrison_exists']:
+            # Garnizon xabarlari lordlarga yuboriladi
+            garrison_log_lines = garrison_result['log']
+            for lord_id in [attacker.lord_id, defender.lord_id]:
+                if not lord_id:
+                    continue
+                try:
+                    await bot.send_message(
+                        lord_id,
+                        "\n".join(garrison_log_lines),
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+
+            if not garrison_result['garrison_defeated']:
+                # Garnizon yengmadi — urush to'xtatiladi, hujumchi chekinadi
+                winner_name = defender.name
+                loser_name  = attacker.name
+                final_text = (
+                    f"🏯 <b>Garnizon hujumchini to'xtatdi!</b>\n\n"
+                    f"⚔️ {attacker.name} → {defender.name} hujumi\n"
+                    f"🔵 {defender.region.value} garnizoni hujumni qaytardi.\n\n"
+                    f"🔴 {attacker.name} chekinishga majbur bo'ldi."
+                )
+                for lord_id in [attacker.lord_id, defender.lord_id]:
+                    if not lord_id:
+                        continue
+                    try:
+                        await bot.send_message(lord_id, final_text, parse_mode="HTML")
+                    except Exception:
+                        pass
+
+                # Hujumchi yo'qotmalarini balansdan ayirish
+                att_losses = garrison_result['attacker_losses']
+                await house_repo.update_military(
+                    attacker.id,
+                    soldiers  = -att_losses['soldiers'],
+                    dragons   = -att_losses['dragons'],
+                    scorpions = -att_losses['scorpions'],
+                )
+                if not att_auto:
+                    # Deployment tirik qolgan askarlarni qaytarish (yo'qotmalardan tashqari)
+                    remaining = garrison_result['attacker_remaining']
+                    await house_repo.update_military(
+                        attacker.id,
+                        soldiers  = remaining['soldiers'],
+                        dragons   = remaining['dragons'],
+                        scorpions = remaining['scorpions'],
+                    )
+
+                # Urushni yakunlash — mudofaachi g'olib
+                await war_repo.end_war(
+                    war.id, defender.id, 0,
+                    attacker_soldiers_lost=att_losses['soldiers'],
+                    defender_soldiers_lost=0,
+                    attacker_dragons_lost=att_losses['dragons'],
+                    defender_dragons_lost=0,
+                )
+                return
+
+            # Garnizon yengildi — hujumchi kamaygan resurslar bilan asosiy jangga kiradi
+            remaining = garrison_result['attacker_remaining']
+            att_soldiers  = remaining['soldiers']
+            att_dragons   = remaining['dragons']
+            att_scorpions = remaining['scorpions']
+            att_proxy = _HouseProxy(attacker, att_soldiers, att_dragons, att_scorpions)
+
     # ── Custom itemlar ────────────────────────────────────────────────
     custom_repo = CustomItemRepo(session)
     att_ci_rows = await custom_repo.get_house_items_with_info(attacker.id)
