@@ -5,7 +5,7 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo, MarketRepo, BotSettingsRepo
+from database.repositories import UserRepo, HouseRepo, MarketRepo, BotSettingsRepo, HouseResourcesRepo
 from database.models import RoleEnum, RegionEnum, House
 from keyboards import admin_keyboard, back_only_keyboard
 from config.settings import settings
@@ -64,6 +64,8 @@ class AdminState(StatesGroup):
     waiting_knight_buy_limit = State()
     # Pauza
     waiting_pause_reason = State()
+    # Xonadon resurslari tahrirlash
+    waiting_house_resource_value = State()
 
 
 # ─── BANK LIMIT — runtime o'zgaruvchilar ───
@@ -2458,5 +2460,153 @@ async def admin_pause_reason_input(message: Message, state: FSMContext):
         f"📌 Sabab: <i>{reason}</i>\n\n"
         f"Foydalanuvchilar bu xabarni ko'radi.\n"
         f"Qayta yoqish uchun: Admin Panel → ⏸ O'yinni Pauza/Davom",
+        parse_mode="HTML"
+    )
+
+
+# ─────────────────────────────────────────────────
+# BOSQICH 4 — XONADON RESURSLARI TAHRIRLASH
+# ─────────────────────────────────────────────────
+
+_HRES_FIELDS = {
+    "market":   ("market_buy_limit",  "🛒 Bozor kunlik askar limiti"),
+    "bank_min": ("bank_min_loan",     "🏦 Bank minimum qarz"),
+    "bank_max": ("bank_max_loan",     "🏦 Bank maksimum qarz"),
+    "farm":     ("daily_farm_amount", "🌾 Kunlik farm miqdori (askar)"),
+}
+
+
+def _hres_keyboard(house_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛒 Bozor limiti",  callback_data=f"admin:hres:edit:market:{house_id}")],
+        [InlineKeyboardButton(text="🏦 Bank min",      callback_data=f"admin:hres:edit:bank_min:{house_id}")],
+        [InlineKeyboardButton(text="🏦 Bank max",      callback_data=f"admin:hres:edit:bank_max:{house_id}")],
+        [InlineKeyboardButton(text="🌾 Kunlik farm",   callback_data=f"admin:hres:edit:farm:{house_id}")],
+        [InlineKeyboardButton(text="🔙 Orqaga",        callback_data="admin:house_resources")],
+    ])
+
+
+@router.callback_query(F.data == "admin:house_resources")
+async def admin_house_resources_menu(callback: CallbackQuery):
+    """Barcha xonadonlar ro'yxati — resurs tahrirlash uchun"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        house_repo = HouseRepo(session)
+        houses = await house_repo.get_all()
+
+    kb = house_list_keyboard(houses, action_prefix="admin:hres", back_to="admin:back")
+    await callback.answer()
+    await callback.message.edit_text(
+        "🏰 <b>Xonadon Resurslari</b>\n\n"
+        "Tahrirlash uchun xonadon tanlang:",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("admin:hres:") & ~F.data.startswith("admin:hres:edit:"))
+async def admin_house_resources_select(callback: CallbackQuery):
+    """Tanlangan xonadonning joriy resurs sozlamalarini ko'rsatadi"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    house_id = int(callback.data.split(":")[2])
+
+    async with AsyncSessionFactory() as session:
+        house_repo = HouseRepo(session)
+        res_repo   = HouseResourcesRepo(session)
+
+        house = await house_repo.get_by_id(house_id)
+        if not house:
+            await callback.answer("❌ Xonadon topilmadi.", show_alert=True)
+            return
+
+        res = await res_repo.get_or_create(house_id)
+        await session.commit()
+
+    text = (
+        f"🏰 <b>{house.name}</b> — Resurs sozlamalari\n\n"
+        f"🛒 Bozor kunlik askar limiti: <b>{res.market_buy_limit}</b>\n"
+        f"🏦 Bank min qarz: <b>{res.bank_min_loan:,}</b>\n"
+        f"🏦 Bank max qarz: <b>{res.bank_max_loan:,}</b>\n"
+        f"🌾 Kunlik farm (askar): <b>{res.daily_farm_amount}</b>\n"
+    )
+    await callback.answer()
+    await callback.message.edit_text(
+        text,
+        reply_markup=_hres_keyboard(house_id),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("admin:hres:edit:"))
+async def admin_house_resources_edit_start(callback: CallbackQuery, state: FSMContext):
+    """Tahrirlash maydonini tanlash — qiymat kiritish bosqichi"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    # admin:hres:edit:field:house_id
+    parts    = callback.data.split(":")
+    field    = parts[3]
+    house_id = int(parts[4])
+
+    if field not in _HRES_FIELDS:
+        await callback.answer("❌ Noma'lum maydon.", show_alert=True)
+        return
+
+    _, label = _HRES_FIELDS[field]
+
+    await state.update_data(hres_house_id=house_id, hres_field=field)
+    await state.set_state(AdminState.waiting_house_resource_value)
+    await callback.answer()
+    await callback.message.answer(
+        f"✏️ <b>{label}</b>\n\n"
+        f"Yangi qiymatni kiriting (musbat son):",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_house_resource_value)
+async def admin_house_resources_save(message: Message, state: FSMContext):
+    """Yangi qiymatni qabul qilib DB ga yozadi"""
+    if not is_admin(message.from_user.id):
+        return
+
+    try:
+        val = int(message.text.strip())
+        if val <= 0:
+            raise ValueError
+    except (ValueError, AttributeError):
+        await message.answer("❌ Musbat butun son kiriting.")
+        return
+
+    data     = await state.get_data()
+    house_id = data.get("hres_house_id")
+    field    = data.get("hres_field")
+
+    if not house_id or not field or field not in _HRES_FIELDS:
+        await message.answer("❌ Xatolik yuz berdi. Qaytadan urinib ko'ring.")
+        await state.clear()
+        return
+
+    db_field, label = _HRES_FIELDS[field]
+
+    async with AsyncSessionFactory() as session:
+        house_repo = HouseRepo(session)
+        res_repo   = HouseResourcesRepo(session)
+
+        house = await house_repo.get_by_id(house_id)
+        await res_repo.update(house_id, **{db_field: val})
+        await session.commit()
+
+    await state.clear()
+    await message.answer(
+        f"✅ <b>{house.name if house else house_id}</b>\n"
+        f"{label}: <b>{val:,}</b> ga o'rnatildi.",
         parse_mode="HTML"
     )
