@@ -6,6 +6,7 @@ from database.models import (
     InternalMessage, Chronicle, MarketPrice,
     RoleEnum, RegionEnum, WarStatusEnum,
     AllianceGroup, AllianceGroupMember, AllianceGroupInvite,
+    HouseResources, TerritoryGarrison,
 )
 from typing import Optional, List
 import math
@@ -1722,3 +1723,158 @@ class KnightOrderRepo:
             .options(selectinload(KnightOrder.knight))
         )
         return result.scalars().all()
+
+
+# ─────────────────────────────────────────────────
+# BOSQICH 2 — YANGI REPOLAR
+# ─────────────────────────────────────────────────
+
+class HouseResourcesRepo:
+    """
+    Har bir xonadon uchun alohida resurs limitlarini boshqaradi.
+    Yozuv bo'lmasa — get_or_create avtomatik default qiymatlar bilan yaratadi.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_or_create(self, house_id: int) -> HouseResources:
+        """Xonadon resurs yozuvini oladi; yo'q bo'lsa default bilan yaratadi."""
+        result = await self.session.execute(
+            select(HouseResources).where(HouseResources.house_id == house_id)
+        )
+        res = result.scalar_one_or_none()
+        if res is None:
+            res = HouseResources(house_id=house_id)
+            self.session.add(res)
+            await self.session.flush()
+        return res
+
+    async def update(self, house_id: int, **kwargs) -> HouseResources:
+        """
+        Xonadon resurs sozlamalarini yangilaydi.
+        Ruxsat etilgan maydonlar: market_buy_limit, bank_min_loan,
+        bank_max_loan, daily_farm_amount.
+        """
+        allowed = {"market_buy_limit", "bank_min_loan", "bank_max_loan", "daily_farm_amount"}
+        filtered = {k: v for k, v in kwargs.items() if k in allowed}
+        if not filtered:
+            raise ValueError(f"Hech qanday to'g'ri maydon yo'q: {list(kwargs.keys())}")
+
+        res = await self.get_or_create(house_id)
+        for key, val in filtered.items():
+            setattr(res, key, val)
+        await self.session.flush()
+        return res
+
+    async def get_all(self) -> List[HouseResources]:
+        """Barcha xonadonlarning resurs yozuvlarini qaytaradi."""
+        result = await self.session.execute(select(HouseResources))
+        return list(result.scalars().all())
+
+
+class TerritoryGarrisonRepo:
+    """
+    Hudud garnizoni — hukmdor o'z hududiga joylashtiradigan
+    doimiy mudofaa kuchi.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_by_region(self, region: RegionEnum) -> Optional[TerritoryGarrison]:
+        """Hudud garnizoni yozuvini qaytaradi; yo'q bo'lsa None."""
+        result = await self.session.execute(
+            select(TerritoryGarrison).where(
+                TerritoryGarrison.region == region
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def set_garrison(
+        self,
+        region: RegionEnum,
+        hukmdor_house_id: int,
+        soldiers: int,
+        dragons: int,
+        scorpions: int,
+    ) -> TerritoryGarrison:
+        """
+        Garnizonni to'liq yangilaydi yoki yaratadi.
+        Qiymatlar manfiy bo'lsa — 0 ga tushiriladi.
+        """
+        soldiers  = max(0, soldiers)
+        dragons   = max(0, dragons)
+        scorpions = max(0, scorpions)
+
+        garrison = await self.get_by_region(region)
+        if garrison is not None:
+            garrison.hukmdor_house_id = hukmdor_house_id
+            garrison.soldiers         = soldiers
+            garrison.dragons          = dragons
+            garrison.scorpions        = scorpions
+        else:
+            garrison = TerritoryGarrison(
+                region=region,
+                hukmdor_house_id=hukmdor_house_id,
+                soldiers=soldiers,
+                dragons=dragons,
+                scorpions=scorpions,
+            )
+            self.session.add(garrison)
+        await self.session.flush()
+        return garrison
+
+    async def apply_losses(
+        self,
+        region: RegionEnum,
+        soldiers_lost: int = 0,
+        dragons_lost: int = 0,
+        scorpions_lost: int = 0,
+    ) -> Optional[TerritoryGarrison]:
+        """
+        Jang natijasida garnizon yo'qotishlarini qo'llaydi.
+        Qiymatlar 0 dan pastga tushmaydi.
+        Garnizon mavjud bo'lmasa None qaytaradi.
+        """
+        garrison = await self.get_by_region(region)
+        if garrison is None:
+            return None
+        garrison.soldiers  = max(0, garrison.soldiers  - soldiers_lost)
+        garrison.dragons   = max(0, garrison.dragons   - dragons_lost)
+        garrison.scorpions = max(0, garrison.scorpions - scorpions_lost)
+        await self.session.flush()
+        return garrison
+
+    async def clear_garrison(self, region: RegionEnum) -> None:
+        """
+        Garnizonni nolga tushiradi (masalan, hukmdor o'zgarganda).
+        Yozuv bo'lmasa — hech narsa qilmaydi.
+        """
+        garrison = await self.get_by_region(region)
+        if garrison is not None:
+            garrison.soldiers  = 0
+            garrison.dragons   = 0
+            garrison.scorpions = 0
+            await self.session.flush()
+
+    async def is_empty(self, region: RegionEnum) -> bool:
+        """Garnizon bo'sh (hech qanday kuch yo'q) mi?"""
+        garrison = await self.get_by_region(region)
+        if garrison is None:
+            return True
+        return garrison.soldiers == 0 and garrison.dragons == 0 and garrison.scorpions == 0
+
+    async def total_strength(self, region: RegionEnum) -> dict:
+        """
+        Hudud garnizonining kuch ko'rsatkichlari.
+        Qaytaradi: {'soldiers': int, 'dragons': int, 'scorpions': int}
+        """
+        garrison = await self.get_by_region(region)
+        if garrison is None:
+            return {"soldiers": 0, "dragons": 0, "scorpions": 0}
+        return {
+            "soldiers":  garrison.soldiers,
+            "dragons":   garrison.dragons,
+            "scorpions": garrison.scorpions,
+        }
