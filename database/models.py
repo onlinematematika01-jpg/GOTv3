@@ -521,3 +521,56 @@ class IronBankDeposit(Base):
 
     house = relationship("House", foreign_keys=[house_id])
     war_winner = relationship("House", foreign_keys=[war_winner_house_id])
+
+
+# ─────────────────────────────────────────────────
+# BOSQICH 1 — YANGI MODELLAR
+# ─────────────────────────────────────────────────
+
+class HouseResources(Base):
+    """
+    Har bir xonadon uchun admin tomonidan alohida belgilanadigan
+    resurs limitleri va kunlik farm sozlamalari.
+    Agar yozuv bo'lmasa — global default qiymatlar ishlatiladi.
+    """
+    __tablename__ = "house_resources"
+
+    id                = Column(Integer, primary_key=True, autoincrement=True)
+    house_id          = Column(Integer, ForeignKey("houses.id"), nullable=False, unique=True)
+
+    # Bozor: kunlik askar sotib olish limiti
+    market_buy_limit  = Column(Integer, default=500)
+
+    # Temir bank: qarz chegaralari
+    bank_min_loan     = Column(BigInteger, default=100)
+    bank_max_loan     = Column(BigInteger, default=100_000)
+
+    # Kunlik farm: askar miqdori
+    daily_farm_amount = Column(Integer, default=50)
+
+    updated_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    house = relationship("House", foreign_keys=[house_id])
+
+
+class TerritoryGarrison(Base):
+    """
+    Hukmdor o'z hududiga joylashtiradigan doimiy mudofaa garnizoni.
+    Tashqi hujumchi avval shu garnizon bilan jangga kiradi.
+    Har hudud uchun bitta yozuv (unique region).
+    """
+    __tablename__ = "territory_garrisons"
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    region           = Column(
+        Enum(RegionEnum, values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+        unique=True
+    )
+    hukmdor_house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
+    soldiers         = Column(Integer, default=0)
+    dragons          = Column(Integer, default=0)
+    scorpions        = Column(Integer, default=0)
+    updated_at       = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    hukmdor_house = relationship("House", foreign_keys=[hukmdor_house_id])
