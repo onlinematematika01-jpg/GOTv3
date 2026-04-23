@@ -17,6 +17,7 @@ from handlers.prisoner import router as prisoner_router
 from handlers.guide import router as guide_router
 from handlers.knight import router as knight_router
 from handlers.knight_market import router as knight_market_router
+from handlers.territory import router as territory_router
 
 
 def register_all_handlers(dp: Dispatcher):
@@ -39,3 +40,4 @@ def register_all_handlers(dp: Dispatcher):
     dp.include_router(guide_router)
     dp.include_router(knight_router)
     dp.include_router(knight_market_router)
+    dp.include_router(territory_router)
