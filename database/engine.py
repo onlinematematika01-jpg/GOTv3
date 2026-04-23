@@ -58,6 +58,7 @@ async def create_tables():
     await _seed_houses()
     await _migrate_create_alliance_group_tables()
     await _migrate_create_new_war_tables()
+    await _migrate_create_stage1_tables()
 
 
 async def _migrate_create_enums():
@@ -309,3 +310,55 @@ async def _migrate_create_new_war_tables():
     )
 
     logger.info("Migration: war_deployments, prisoners jadvallari va executed_lord_flag tayyor")
+
+
+async def _migrate_create_stage1_tables():
+    """
+    BOSQICH 1 — HouseResources, TerritoryGarrison jadvallari va
+    BotSettings kalit-qiymatlari (game_paused, pause_reason).
+    Idempotent: allaqachon mavjud bo'lsa xatolik bermaydi.
+    """
+
+    # 1. house_resources jadvali
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS house_resources (
+                id                SERIAL PRIMARY KEY,
+                house_id          INTEGER NOT NULL UNIQUE REFERENCES houses(id) ON DELETE CASCADE,
+                market_buy_limit  INTEGER NOT NULL DEFAULT 500,
+                bank_min_loan     BIGINT  NOT NULL DEFAULT 100,
+                bank_max_loan     BIGINT  NOT NULL DEFAULT 100000,
+                daily_farm_amount INTEGER NOT NULL DEFAULT 50,
+                updated_at        TIMESTAMP DEFAULT NOW()
+            )
+        """))
+    logger.info("Migration (stage1): house_resources jadvali tayyor")
+
+    # 2. territory_garrisons jadvali
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS territory_garrisons (
+                id                SERIAL PRIMARY KEY,
+                region            VARCHAR(64) NOT NULL UNIQUE,
+                hukmdor_house_id  INTEGER NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+                soldiers          INTEGER NOT NULL DEFAULT 0,
+                dragons           INTEGER NOT NULL DEFAULT 0,
+                scorpions         INTEGER NOT NULL DEFAULT 0,
+                updated_at        TIMESTAMP DEFAULT NOW()
+            )
+        """))
+    logger.info("Migration (stage1): territory_garrisons jadvali tayyor")
+
+    # 3. BotSettings — game_paused va pause_reason kalitlari
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            INSERT INTO bot_settings (key, value)
+            VALUES ('game_paused', 'false')
+            ON CONFLICT (key) DO NOTHING
+        """))
+        await conn.execute(text("""
+            INSERT INTO bot_settings (key, value)
+            VALUES ('pause_reason', '')
+            ON CONFLICT (key) DO NOTHING
+        """))
+    logger.info("Migration (stage1): game_paused va pause_reason kalitlari tayyor")
