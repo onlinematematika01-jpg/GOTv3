@@ -2610,3 +2610,158 @@ async def admin_house_resources_save(message: Message, state: FSMContext):
         f"{label}: <b>{val:,}</b> ga o'rnatildi.",
         parse_mode="HTML"
     )
+
+
+# ─────────────────────────────────────────────────
+# BOSQICH 5 — XONADON CUSTOM ITEMLARINI TAHRIRLASH
+# ─────────────────────────────────────────────────
+
+class HouseItemState(StatesGroup):
+    waiting_qty = State()
+
+
+@router.callback_query(F.data == "admin:house_items")
+async def admin_house_items_menu(callback: CallbackQuery):
+    """Xonadon tanlash — uning custom itemlarini ko'rish/tahrirlash"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        house_repo = HouseRepo(session)
+        houses = await house_repo.get_all()
+
+    kb = house_list_keyboard(houses, action_prefix="admin:hitems", back_to="admin:back")
+    await callback.answer()
+    await callback.message.edit_text(
+        "🎒 <b>Xonadon Custom Itemlari</b>\n\n"
+        "Tahrirlash uchun xonadon tanlang:",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("admin:hitems:") & ~F.data.startswith("admin:hitems:set:"))
+async def admin_house_items_view(callback: CallbackQuery):
+    """Tanlangan xonadonning barcha custom itemlarini ko'rsatadi"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    house_id = int(callback.data.split(":")[2])
+
+    async with AsyncSessionFactory() as session:
+        house_repo  = HouseRepo(session)
+        from database.repositories import CustomItemRepo
+        item_repo   = CustomItemRepo(session)
+
+        house       = await house_repo.get_by_id(house_id)
+        if not house:
+            await callback.answer("❌ Xonadon topilmadi.", show_alert=True)
+            return
+
+        # Xonadon itemlarini olish
+        owned_rows  = await item_repo.get_house_items_with_info(house_id)
+        all_items   = await item_repo.get_all_items()
+
+    # owned_rows — quantity > 0 bo'lgan itemlar
+    owned_map = {row.item_id: row.quantity for row in owned_rows}
+
+    if not all_items:
+        await callback.answer("ℹ️ Hech qanday custom item yaratilmagan.", show_alert=True)
+        return
+
+    lines = [f"🎒 <b>{house.name}</b> — Custom Itemlar\n"]
+    buttons = []
+    for item in all_items:
+        qty = owned_map.get(item.id, 0)
+        lines.append(f"{item.emoji} {item.name}: <b>{qty}</b> ta")
+        buttons.append([InlineKeyboardButton(
+            text=f"✏️ {item.emoji} {item.name} ({qty})",
+            callback_data=f"admin:hitems:set:{house_id}:{item.id}"
+        )])
+
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:house_items")])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await callback.answer()
+    await callback.message.edit_text(
+        "\n".join(lines),
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("admin:hitems:set:"))
+async def admin_house_item_set_start(callback: CallbackQuery, state: FSMContext):
+    """Miqdor kiritish bosqichi — FSM ga kiradi"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    # admin:hitems:set:house_id:item_id
+    parts    = callback.data.split(":")
+    house_id = int(parts[3])
+    item_id  = int(parts[4])
+
+    async with AsyncSessionFactory() as session:
+        from database.repositories import CustomItemRepo
+        item_repo = CustomItemRepo(session)
+        from database.models import CustomItem
+        result = await session.execute(
+            select(CustomItem).where(CustomItem.id == item_id)
+        )
+        item = result.scalar_one_or_none()
+
+    if not item:
+        await callback.answer("❌ Item topilmadi.", show_alert=True)
+        return
+
+    await state.update_data(hitem_house_id=house_id, hitem_item_id=item_id,
+                            hitem_name=item.name, hitem_emoji=item.emoji)
+    await state.set_state(HouseItemState.waiting_qty)
+    await callback.answer()
+    await callback.message.answer(
+        f"✏️ <b>{item.emoji} {item.name}</b>\n\n"
+        f"Yangi miqdorni kiriting (0 = nolga tushirish):",
+        parse_mode="HTML"
+    )
+
+
+@router.message(HouseItemState.waiting_qty)
+async def admin_house_item_save(message: Message, state: FSMContext):
+    """Yangi miqdorni qabul qilib DB ga yozadi"""
+    if not is_admin(message.from_user.id):
+        return
+
+    try:
+        qty = int(message.text.strip())
+        if qty < 0:
+            raise ValueError
+    except (ValueError, AttributeError):
+        await message.answer("❌ 0 yoki undan katta son kiriting.")
+        return
+
+    data     = await state.get_data()
+    house_id = data.get("hitem_house_id")
+    item_id  = data.get("hitem_item_id")
+    name     = data.get("hitem_name", "Item")
+    emoji    = data.get("hitem_emoji", "🎒")
+
+    if not house_id or not item_id:
+        await message.answer("❌ Xatolik yuz berdi. Qaytadan urinib ko'ring.")
+        await state.clear()
+        return
+
+    async with AsyncSessionFactory() as session:
+        from database.repositories import CustomItemRepo
+        item_repo = CustomItemRepo(session)
+        await item_repo.set_house_item_qty(house_id, item_id, qty)
+        await session.commit()
+
+    await state.clear()
+    await message.answer(
+        f"✅ {emoji} <b>{name}</b> miqdori → <b>{qty}</b> ta\n"
+        f"xonadon uchun yangilandi.",
+        parse_mode="HTML"
+    )
