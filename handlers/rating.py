@@ -3,7 +3,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database.engine import AsyncSessionFactory
-from database.repositories import RatingRepo, CustomItemRepo, AllianceGroupRepo, HouseRepo, PrisonerRepo
+from database.repositories import RatingRepo, CustomItemRepo, AllianceGroupRepo, HouseRepo, PrisonerRepo, GameSeasonRepo
 from database.models import RegionEnum
 from keyboards import rating_menu_keyboard
 
@@ -417,3 +417,45 @@ async def rating_page(callback: CallbackQuery):
         await callback.answer()
         return
     await _show_rating(callback, rating_type, page)
+
+
+# ─── O'YIN TARIXI (BOSQICH 1) ──────────────────────────────────────────────
+
+@router.callback_query(F.data == "rating:seasons")
+async def rating_seasons(callback: CallbackQuery):
+    await callback.answer()
+
+    async with AsyncSessionFactory() as session:
+        repo = GameSeasonRepo(session)
+        seasons = await repo.get_all()
+        current_num = await repo.get_current_number()
+
+    if not seasons:
+        text = (
+            "🏆 <b>O'YIN TARIXI</b>\n\n"
+            "Hali tugallangan sezon yo'q.\n\n"
+            f"⚔️ Joriy sezon: <b>#{current_num}</b> davom etmoqda..."
+        )
+    else:
+        lines = ["🏆 <b>O'YIN TARIXI</b>\n"]
+        for s in seasons:
+            date_str = s.ended_at.strftime("%Y-%m-%d") if s.ended_at else "?"
+            if s.winner_house_name:
+                region = f" ({s.winner_region})" if s.winner_region else ""
+                winner = f"🏰 {s.winner_house_name}{region}"
+            else:
+                winner = "G'olibsiz"
+            lines.append(f"Sezon #{s.season_number}  →  {winner}  [{date_str}]")
+
+        lines.append(f"\nSezon #{current_num}  →  Hali davom etmoqda...")
+        text = "\n".join(lines)
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔙 Reyting menyusi", callback_data="rating:menu")
+    ]])
+
+    try:
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
