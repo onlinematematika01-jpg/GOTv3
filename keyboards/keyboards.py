@@ -1,19 +1,353 @@
-from .keyboards import (
-    main_menu_keyboard, war_menu_keyboard, market_keyboard,
-    iron_bank_keyboard, diplomacy_keyboard, surrender_or_fight_keyboard,
-    confirm_keyboard, admin_keyboard, house_list_keyboard, quantity_keyboard,
-    back_only_keyboard, with_back, back_button, rating_menu_keyboard,
-    alliance_request_keyboard, alliance_group_menu_keyboard, alliance_invite_keyboard,
-    deploy_resources_keyboard, deploy_confirm_keyboard,
-    guide_keyboard,
-)
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+from database.models import RoleEnum
 
-__all__ = [
-    "main_menu_keyboard", "war_menu_keyboard", "market_keyboard",
-    "iron_bank_keyboard", "diplomacy_keyboard", "surrender_or_fight_keyboard",
-    "confirm_keyboard", "admin_keyboard", "house_list_keyboard", "quantity_keyboard",
-    "back_only_keyboard", "with_back", "back_button", "rating_menu_keyboard",
-    "alliance_request_keyboard", "alliance_group_menu_keyboard", "alliance_invite_keyboard",
-    "deploy_resources_keyboard", "deploy_confirm_keyboard",
-    "guide_keyboard",
-]
+
+def back_button(callback_data: str = "back:main") -> list:
+    """Orqaga tugma — inline keyboard uchun"""
+    return [InlineKeyboardButton(text="🔙 Orqaga", callback_data=callback_data)]
+
+
+def main_menu_keyboard(role: RoleEnum) -> ReplyKeyboardMarkup:
+    builder = ReplyKeyboardBuilder()
+    builder.row(KeyboardButton(text="👤 Profil"), KeyboardButton(text="🏰 Xonadon"))
+    builder.row(KeyboardButton(text="⚔️ Urush"), KeyboardButton(text="🛒 Bozor"))
+    builder.row(KeyboardButton(text="🏦 Temir Bank"), KeyboardButton(text="📜 Xronika"))
+    builder.row(KeyboardButton(text="💬 Ichki Chat"), KeyboardButton(text="🤝 Diplomatiya"))
+    builder.row(KeyboardButton(text="🏆 Reyting"), KeyboardButton(text="📖 Qo'llanma"))
+    if role in [RoleEnum.LORD, RoleEnum.HIGH_LORD]:
+        builder.row(KeyboardButton(text="👑 Hukmdorlik Da'vosi"))
+        builder.row(KeyboardButton(text="⚔️ Ritsar Saylash"), KeyboardButton(text="⚔️ Ritsarlarni Boshqarish"))
+        builder.row(KeyboardButton(text="🔗 Taklif Linki"))
+    if role == RoleEnum.KNIGHT:
+        builder.row(KeyboardButton(text="⚔️ Ritsar Profili"), KeyboardButton(text="🌾 Ritsar Farm"))
+        builder.row(KeyboardButton(text="🛒 Ritsar Bozori"))
+    if role in [RoleEnum.ADMIN]:
+        builder.row(KeyboardButton(text="🔧 Admin Panel"))
+    return builder.as_markup(resize_keyboard=True)
+
+
+def rating_menu_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⚡ Umumiy Kuch", callback_data="rating:power")
+    builder.button(text="🗡️ Askarlar", callback_data="rating:soldiers")
+    builder.button(text="💰 Oltin", callback_data="rating:gold")
+    builder.button(text="🐉 Jangchilar", callback_data="rating:dragons")
+    builder.button(text="🏆 Jangda Yutgani", callback_data="rating:wins")
+    builder.button(text="⚔️ Kuchli Ittifoqlar", callback_data="rating:alliances")
+    builder.button(text="🏦 Omonatlar", callback_data="rating:deposit")
+    builder.button(text="🗺️ Hududlar Holati", callback_data="rating:regions")
+    builder.button(text="📜 O'yin Tarixi", callback_data="rating:seasons")
+    builder.adjust(2, 2, 2, 2, 1)
+    return builder.as_markup()
+
+
+def war_menu_keyboard(is_lord: bool, has_active_war: bool) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if is_lord:
+        builder.button(text="⚔️ Urush E'lon Qilish", callback_data="war:declare")
+    if has_active_war:
+        builder.button(text="🏳️ Taslim Bo'lish", callback_data="war:surrender")
+        builder.button(text="🗡️ Jangga Kirish", callback_data="war:fight")
+    builder.button(text="📊 Urush Holati", callback_data="war:status")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def market_keyboard(custom_items=None) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🗡️ Askar Sotib Olish", callback_data="market:buy:soldier")
+    builder.button(text="🐉 Ajdar Sotib Olish", callback_data="market:buy:dragon")
+    builder.button(text="🏹 Skorpion Sotib Olish", callback_data="market:buy:scorpion")
+    if custom_items:
+        for item in custom_items:
+            builder.button(
+                text=f"{item.emoji} {item.name} Sotib Olish",
+                callback_data=f"market:custom:{item.id}"
+            )
+    builder.button(text="🏰 Xonadon Oldindan Sotib Olish", callback_data="market:pre_house")
+    builder.button(text="📊 Narxlar", callback_data="market:prices")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def custom_item_market_keyboard(items) -> InlineKeyboardMarkup:
+    """Faqat maxsus itemlar uchun keyboard"""
+    builder = InlineKeyboardBuilder()
+    for item in items:
+        builder.button(
+            text=f"{item.emoji} {item.name} — {item.price:,} tanga",
+            callback_data=f"market:custom:{item.id}"
+        )
+    builder.button(text="🔙 Orqaga", callback_data="market:back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def iron_bank_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💰 Qarz Olish", callback_data="bank:loan")
+    builder.button(text="💸 Qarz To'lash", callback_data="bank:repay")
+    builder.button(text="📋 Qarz Holati", callback_data="bank:status")
+    builder.button(text="🏦 Omonat", callback_data="bank:deposit_menu")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def diplomacy_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🏰 Ittifoq Guruhi", callback_data="diplo:group_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def alliance_group_menu_keyboard(in_group: bool, is_leader: bool) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if in_group:
+        builder.button(text="📋 Guruh ma'lumotlari", callback_data="diplo:group_info")
+        if is_leader:
+            builder.button(text="📨 Taklif yuborish", callback_data="diplo:group_invite")
+            builder.button(text="✏️ Nom o'zgartirish", callback_data="diplo:group_rename")
+            builder.button(text="💔 Guruhni tarqatish", callback_data="diplo:group_disband")
+        else:
+            builder.button(text="🚪 Guruhdan chiqish", callback_data="diplo:group_leave")
+    else:
+        builder.button(text="➕ Yangi Ittifoq Guruhi Tuzish", callback_data="diplo:group_create")
+    builder.button(text="🔙 Orqaga", callback_data="diplo:back_main")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def alliance_invite_keyboard(invite_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Qabul qilish", callback_data=f"diplo:inv_accept:{invite_id}")
+    builder.button(text="❌ Rad etish", callback_data=f"diplo:inv_reject:{invite_id}")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def surrender_or_fight_keyboard(war_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🏳️ Taslim Bo'lish (50% resurs berish)", callback_data=f"war:do_surrender:{war_id}")
+    builder.button(text="⚔️ Jangga Kirish!", callback_data=f"war:do_fight:{war_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def war_selection_keyboard(wars: list, action: str, house_id: int = 0) -> InlineKeyboardMarkup:
+    """Bir nechta urush bo'lganda tanlash keyboard"""
+    builder = InlineKeyboardBuilder()
+    for war in wars:
+        if war.attacker_house_id == house_id:
+            other_name = war.defender.name if war.defender else f"Urush #{war.id}"
+            role = "⚔️"
+        else:
+            other_name = war.attacker.name if war.attacker else f"Urush #{war.id}"
+            role = "🛡️"
+        builder.button(
+            text=f"{role} vs {other_name}",
+            callback_data=f"war:{action}:{war.id}"
+        )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def confirm_keyboard(action: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Tasdiqlash", callback_data=f"confirm:{action}")
+    builder.button(text="❌ Bekor Qilish", callback_data="cancel")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def admin_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💰 Narx O'zgartirish", callback_data="admin:prices")
+    builder.button(text="🏦 Bank Foiz O'zgartirish", callback_data="admin:interest")
+    builder.button(text="👥 Foydalanuvchilar", callback_data="admin:users")
+    builder.button(text="🏰 Xonadonlar", callback_data="admin:houses")
+    builder.button(text="📢 Xabar Yuborish", callback_data="admin:broadcast")
+    builder.button(text="🏰 Xonadon Qo'shish", callback_data="admin:add_house")
+    builder.button(text="👑 Hukmdor Tayinlash", callback_data="admin:set_high_lord")
+    builder.button(text="🏦 Bank Limiti", callback_data="admin:bank_limits")
+    builder.button(text="🌾 Farm Jadvali", callback_data="admin:farm_schedule")
+    builder.button(text="💸 Qarzdorlar", callback_data="admin:debtors")
+    builder.button(text="⚔️ Urush Seanslar", callback_data="admin:war_sessions")
+    builder.button(text="🔀 A'zo Ko'chirish", callback_data="admin:transfer_member")
+    builder.button(text="🗑 Bazani Tozalash", callback_data="admin:reset_db")
+    builder.button(text="🧪 Maxsus Itemlar", callback_data="admin:custom_items")
+    builder.button(text="🏆 Turnir boshqaruvi", callback_data="admin:tournament")
+    builder.button(text="☠️ Lord O'ldirish", callback_data="admin:kill_lord")
+    builder.button(text="🏦 Omonat Sozlamalari", callback_data="admin:deposit_settings")
+    builder.button(text="⚔️ Ritsar Sozlamalari", callback_data="admin:knight_settings")
+    builder.button(text="⏸ O'yinni Pauza/Davom", callback_data="admin:toggle_pause")
+    builder.button(text="🏰 Xonadon Resurslari",  callback_data="admin:house_resources")
+    builder.button(text="🎒 Xonadon Itemlari",    callback_data="admin:house_items")
+    builder.button(text="🏰 Kafolatli Xonadon Narxlari", callback_data="admin:pre_house_prices")
+    builder.button(text="👑 Yangi O'yin Lord Tayinlash", callback_data="admin:pre_assign_lord")
+    builder.button(text="🎒 Yangi O'yin Resurslari", callback_data="admin:game_start_resources")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def admin_keyboard_with_back() -> InlineKeyboardMarkup:
+    """Admin panel uchun orqaga tugmasiz (asosiy menyu Reply tugma)"""
+    return admin_keyboard()
+
+
+def house_list_keyboard(houses: list, action_prefix: str, back_to: str = None) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for house in houses:
+        builder.button(
+            text=f"🏰 {house.name} ({house.region.value})",
+            callback_data=f"{action_prefix}:{house.id}"
+        )
+    if back_to:
+        builder.button(text="🔙 Orqaga", callback_data=back_to)
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def quantity_keyboard(item: str, max_qty: int = 100) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for qty in [1, 5, 10, 50, 100]:
+        if qty <= max_qty:
+            builder.button(text=str(qty), callback_data=f"qty:{item}:{qty}")
+    builder.button(text="✏️ Boshqa", callback_data=f"qty:{item}:custom")
+    builder.button(text="🔙 Orqaga", callback_data="market:back")
+    builder.adjust(5)
+    return builder.as_markup()
+
+
+# ── Orqaga tugmali keyboard yordamchi funksiyalar ──────────────────────────
+
+def with_back(markup: InlineKeyboardMarkup, back_to: str) -> InlineKeyboardMarkup:
+    """Mavjud inline keyboard ga orqaga tugma qo'shadi"""
+    buttons = markup.inline_keyboard
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data=back_to)])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def back_only_keyboard(back_to: str) -> InlineKeyboardMarkup:
+    """Faqat orqaga tugma"""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔙 Orqaga", callback_data=back_to)
+    ]])
+
+
+def alliance_request_keyboard(from_house_id: int, to_house_id: int) -> InlineKeyboardMarkup:
+    """Ittifoq taklifini qabul qilish yoki rad etish tugmalari"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="✅ Qabul qilish",
+                callback_data=f"diplo:accept:{from_house_id}:{to_house_id}"
+            ),
+            InlineKeyboardButton(
+                text="❌ Rad etish",
+                callback_data=f"diplo:reject:{from_house_id}:{to_house_id}"
+            ),
+        ]
+    ])
+
+
+def subscription_keyboard(channel_link: str) -> InlineKeyboardMarkup:
+    """Majburiy obuna uchun kanal havolasi va tekshirish tugmasi"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="📢 Kanalga o'tish",
+                url=channel_link,
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="✅ A'zo bo'ldim, tekshirish",
+                callback_data="check_subscription",
+            )
+        ],
+    ])
+
+
+def custom_items_menu_keyboard() -> InlineKeyboardMarkup:
+    """Maxsus itemlar boshqaruv menyusi"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Yangi Item Qo'shish", callback_data="admin:item:add")],
+        [InlineKeyboardButton(text="📋 Barcha Itemlar", callback_data="admin:item:list")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:back")],
+    ])
+
+
+def item_type_keyboard() -> InlineKeyboardMarkup:
+    """Item turi tanlash"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🐉 Hujum (ajdar kabi)", callback_data="itype:attack")],
+        [InlineKeyboardButton(text="🏹 Mudofaa (chayon kabi)", callback_data="itype:defense")],
+        [InlineKeyboardButton(text="🗡️ Askar (qo'shma)", callback_data="itype:soldier")],
+        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="admin:custom_items")],
+    ])
+
+
+def item_manage_keyboard(item_id: int, is_active: bool) -> InlineKeyboardMarkup:
+    """Item boshqarish tugmalari"""
+    toggle_text = "🔴 Deaktiv" if is_active else "🟢 Aktiv"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Tahrirlash", callback_data=f"admin:item:edit:{item_id}")],
+        [InlineKeyboardButton(text=toggle_text, callback_data=f"admin:item:toggle:{item_id}")],
+        [InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"admin:item:delete:{item_id}")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:item:list")],
+    ])
+
+def item_edit_keyboard(item_id: int) -> InlineKeyboardMarkup:
+    """Item tahrirlash maydonlari"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚔️ Hujum kuchini o'zgartir", callback_data=f"admin:item:edit:attack:{item_id}")],
+        [InlineKeyboardButton(text="🛡 Mudofaa kuchini o'zgartir", callback_data=f"admin:item:edit:defense:{item_id}")],
+        [InlineKeyboardButton(text="💰 Narxini o'zgartir", callback_data=f"admin:item:edit:price:{item_id}")],
+        [InlineKeyboardButton(text="📦 Stokni o'zgartir", callback_data=f"admin:item:edit:stock:{item_id}")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data=f"admin:item:info:{item_id}")],
+    ])
+
+
+# ─────────────────────────────────────────────────────────────────
+# 3-BOSQICH: RESURS YUBORISH (DEPLOYMENT) KEYBOARDLARI
+# ─────────────────────────────────────────────────────────────────
+
+def deploy_resources_keyboard(war_id: int) -> InlineKeyboardMarkup:
+    """Resurs yuborish tugmasi — urush e'lon qilinganda lordlarga yuboriladi"""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🗡️ Resurs Yuborish",
+        callback_data=f"deploy:start:{war_id}"
+    )
+    builder.button(
+        text="📊 Joriy Holat",
+        callback_data=f"deploy:status:{war_id}"
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def deploy_confirm_keyboard(war_id: int) -> InlineKeyboardMarkup:
+    """Deployment tasdiqlash / bekor qilish keyboard"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Tasdiqlash",    callback_data=f"deploy:confirm:{war_id}")
+    builder.button(text="❌ Bekor qilish",  callback_data=f"deploy:cancel:{war_id}")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+
+def guide_keyboarddef guide_keyboard(back: bool = False) -> InlineKeyboardMarkup:
+    """O'yin qo'llanmasi bo'limlari klaviaturasi"""
+    builder = InlineKeyboardBuilder()
+    if back:
+        builder.button(text="🔙 Orqaga", callback_data="guide:back")
+    else:
+        builder.button(text="⚔️ Urush", callback_data="guide:urush")
+        builder.button(text="🐉 Jang mexanikasi", callback_data="guide:jang")
+        builder.button(text="🤝 Diplomatiya", callback_data="guide:diplo")
+        builder.button(text="🛒 Bozor", callback_data="guide:bozor")
+        builder.button(text="👑 Rollar", callback_data="guide:rollar")
+        builder.adjust(2, 2, 1)
+    return builder.as_markup()
