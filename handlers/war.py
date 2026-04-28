@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command
 from datetime import datetime, timedelta
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo, WarRepo, AllianceGroupRepo, ChronicleRepo, WarDeploymentRepo, PrisonerRepo
+from database.repositories import UserRepo, HouseRepo, WarRepo, AllianceGroupRepo, ChronicleRepo, WarDeploymentRepo
 from database.models import RoleEnum, WarStatusEnum, WarAllySupport
 from keyboards import war_menu_keyboard, house_list_keyboard, surrender_or_fight_keyboard
 from keyboards.keyboards import war_selection_keyboard, deploy_resources_keyboard, deploy_confirm_keyboard
@@ -227,13 +227,6 @@ async def declare_war_start(callback: CallbackQuery, state: FSMContext):
                 attacker_house.total_dragons == 0 and
                 attacker_house.total_scorpions == 0):
             await callback.answer("❌ Urush ochish uchun resurslaringiz yo'q.", show_alert=True)
-            return
-
-        # 7-BOSQICH: Asir lord urush ocha olmaydi
-        prisoner_repo = PrisonerRepo(session)
-        is_prisoner = await prisoner_repo.get_by_prisoner_user(user.id)
-        if is_prisoner:
-            await callback.answer("❌ Asirlikda urush e'lon qilib bo'lmaydi!", show_alert=True)
             return
 
         # High Lord — barcha hududlarga urush ochishi mumkin
