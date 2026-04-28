@@ -657,6 +657,22 @@ class PreAssignedLord(Base):
     house = relationship("House", foreign_keys=[house_id])
 
 
+class GameStartCustomItem(Base):
+    """
+    O'yin boshida har bir xonadon uchun oldindan tayinlangan custom item miqdori.
+    apply_game_reset() da HouseCustomItem ga ko'chiriladi.
+    """
+    __tablename__ = "game_start_custom_items"
+
+    id       = Column(Integer, primary_key=True, autoincrement=True)
+    house_id = Column(Integer, ForeignKey("houses.id"), nullable=False)
+    item_id  = Column(Integer, ForeignKey("custom_items.id"), nullable=False)
+    quantity = Column(Integer, default=0, nullable=False)
+
+    house = relationship("House",       foreign_keys=[house_id])
+    item  = relationship("CustomItem",  foreign_keys=[item_id])
+
+
 class DailyPurchase(Base):
     """Foydalanuvchining bugungi xaridlari"""
     __tablename__ = "daily_purchases"
