@@ -1,5 +1,6 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import StateFilter
 from aiogram.fsm.state import State, StatesGroup
@@ -662,7 +663,6 @@ async def admin_reset_winner_manual(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Xonadonlar topilmadi.", show_alert=True)
         return
 
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
     builder = InlineKeyboardBuilder()
     for h in houses:
         builder.button(
@@ -980,7 +980,6 @@ async def admin_gsr_menu(callback: CallbackQuery, state: FSMContext):
     back_label = "🔙 Reset ekraniga qaytish" if from_reset else "🔙 Orqaga"
     gsr_all_cb = "admin:gsr:all:reset" if from_reset else "admin:gsr:all"
 
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
     builder = InlineKeyboardBuilder()
     builder.button(text="📋 Barcha Xonadonga Bir Xil", callback_data=gsr_all_cb)
     builder.button(text="🏰 Xonadon Alohida Tahrirlash", callback_data="admin:gsr:house")
@@ -1127,7 +1126,6 @@ async def admin_gsr_house_list(callback: CallbackQuery):
     async with AsyncSessionFactory() as session:
         houses = (await session.execute(select(House))).scalars().all()
 
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
     builder = InlineKeyboardBuilder()
     for h in houses:
         builder.button(text=f"🏰 {h.name}", callback_data=f"admin:gsr:house:{h.id}")
@@ -1184,7 +1182,6 @@ async def admin_gsr_house_detail(callback: CallbackQuery):
         f"🏹 Chayon limiti:       <b>{scorpion_limit}</b>"
     )
 
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
     builder = InlineKeyboardBuilder()
     fields = [
         ("💰 Xazina",          f"admin:gsr:house:edit:{house_id}:treasury"),
@@ -1328,7 +1325,6 @@ async def admin_gsr_view(callback: CallbackQuery):
         else:
             lines.append(f"{h.name:<16} {'—':>8} {'—':>6} {'—':>6} {'—':>7}")
 
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 Orqaga", callback_data="admin:game_start_resources")
 
@@ -1363,11 +1359,14 @@ async def admin_pre_house_prices(callback: CallbackQuery):
         builder = InlineKeyboardBuilder()
         for h in houses:
             price_str = await settings_repo.get(f"pre_house_price:{h.id}")
-            price = int(price_str) if price_str else 0
+            try:
+                price = int(price_str) if price_str else 0
+            except (ValueError, TypeError):
+                price = 0
             pal = await pre_repo.get_by_house(h.id)
             if pal:
                 if pal.source == "admin":
-                    holat = f"Band (Admin)"
+                    holat = "Band (Admin)"
                 else:
                     holat = f"Band (@{pal.username or pal.full_name or pal.user_id})"
             else:
@@ -1381,16 +1380,14 @@ async def admin_pre_house_prices(callback: CallbackQuery):
         builder.button(text="🗑 Band Qilishni Bekor Qilish", callback_data="admin:pre_cancel_all")
         builder.button(text="🔙 Orqaga", callback_data="admin:back")
         builder.adjust(1)
+        markup = builder.as_markup()
+        text = "\n".join(lines)
 
     await callback.answer()
     try:
-        await callback.message.edit_text(
-            "\n".join(lines), reply_markup=builder.as_markup(), parse_mode="HTML"
-        )
+        await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
     except Exception:
-        await callback.message.answer(
-            "\n".join(lines), reply_markup=builder.as_markup(), parse_mode="HTML"
-        )
+        await callback.message.answer(text, reply_markup=markup, parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("admin:pre_house_price:"))
