@@ -3,7 +3,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo, MarketRepo, CustomItemRepo, HouseResourcesRepo, DailyPurchaseRepo
+from database.repositories import UserRepo, HouseRepo, MarketRepo, CustomItemRepo, HouseResourcesRepo, DailyPurchaseRepo, PreAssignedLordRepo, BotSettingsRepo
 from keyboards import market_keyboard, quantity_keyboard, back_only_keyboard
 from keyboards.keyboards import custom_item_market_keyboard
 from sqlalchemy import update
@@ -477,3 +477,237 @@ async def _do_custom_purchase(message, bot, user_id: int, item_id: int, qty: int
         except Exception:
             pass
     await state.clear()
+
+
+# ─── BOSQICH 2 — KAFOLATLI XONADON (PRE-HOUSE) ────────────────────────────
+
+@router.callback_query(F.data == "market:pre_house")
+async def market_pre_house_list(callback: CallbackQuery):
+    """Xonadonlarni kafolatli sotib olish sahifasi"""
+    await callback.answer()
+
+    async with AsyncSessionFactory() as session:
+        from sqlalchemy import select as sa_select
+        from database.models import House as HouseModel
+        houses_result = await session.execute(sa_select(HouseModel))
+        houses = houses_result.scalars().all()
+
+        settings_repo = BotSettingsRepo(session)
+        pre_repo = PreAssignedLordRepo(session)
+
+        # Joriy foydalanuvchining xonadon band qilganini tekshirish
+        user_repo = UserRepo(session)
+        user = await user_repo.get_by_id(callback.from_user.id)
+
+        # Foydalanuvchi allaqachon band qilgan xonadoni bor?
+        my_pal = None
+        for h in houses:
+            pal = await pre_repo.get_by_house(h.id)
+            if pal and pal.user_id == callback.from_user.id and not pal.is_applied:
+                my_pal = (pal, h)
+                break
+
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        lines = [
+            "🏰 <b>YANGI O'YIN UCHUN XONADON BAND QILISH</b>\n",
+            "Siz keyingi o'yin boshlanishida lord sifatida",
+            "avtomatik tayinlanishingiz uchun xonadon sotib olishingiz mumkin.\n",
+            "⚠️ <i>Bu hozirgi o'yinga ta'sir qilmaydi.</i>",
+            "Narxlar admin tomonidan belgilanadi.\n",
+            "Xonadonlar:",
+        ]
+
+        for h in houses:
+            price_str = await settings_repo.get(f"pre_house_price:{h.id}")
+            price = int(price_str) if price_str else 0
+            pal = await pre_repo.get_by_house(h.id)
+
+            if pal and not pal.is_applied:
+                if pal.user_id == callback.from_user.id:
+                    lines.append(f"🏰 {h.name} ({h.region.value}) — {price:,} 💰  ✅ Siz band qilgansiz")
+                else:
+                    lines.append(f"🏰 {h.name} ({h.region.value}) — {price:,} 💰  👑 BAND")
+            else:
+                if price == 0:
+                    lines.append(f"🏰 {h.name} ({h.region.value}) — Narx belgilanmagan")
+                else:
+                    lines.append(f"🏰 {h.name} ({h.region.value}) — {price:,} 💰")
+                    builder.button(
+                        text=f"🏰 {h.name} — {price:,} 💰",
+                        callback_data=f"market:pre_house:buy:{h.id}"
+                    )
+
+    if my_pal:
+        pal, house = my_pal
+        lines.append(f"\n✅ Siz <b>{house.name}</b> xonadonini band qilgansiz.")
+
+    builder.button(text="🔙 Bozor", callback_data="market:back")
+    builder.adjust(1)
+
+    try:
+        await callback.message.edit_text(
+            "\n".join(lines), reply_markup=builder.as_markup(), parse_mode="HTML"
+        )
+    except Exception:
+        await callback.message.answer(
+            "\n".join(lines), reply_markup=builder.as_markup(), parse_mode="HTML"
+        )
+
+
+@router.callback_query(F.data.startswith("market:pre_house:buy:"))
+async def market_pre_house_buy_confirm(callback: CallbackQuery):
+    """Xonadon band qilishni tasdiqlash"""
+    house_id = int(callback.data.split(":")[-1])
+
+    async with AsyncSessionFactory() as session:
+        from sqlalchemy import select as sa_select
+        from database.models import House as HouseModel
+        house = (await session.execute(
+            sa_select(HouseModel).where(HouseModel.id == house_id)
+        )).scalar_one_or_none()
+
+        if not house:
+            await callback.answer("Xonadon topilmadi.", show_alert=True)
+            return
+
+        pre_repo = PreAssignedLordRepo(session)
+        settings_repo = BotSettingsRepo(session)
+
+        # Band qilinganmi?
+        pal = await pre_repo.get_by_house(house_id)
+        if pal and not pal.is_applied:
+            await callback.answer("❌ Bu xonadon allaqachon band qilingan!", show_alert=True)
+            return
+
+        # Foydalanuvchi boshqa xonadon band qilganmi?
+        all_houses_result = await session.execute(sa_select(HouseModel))
+        all_houses = all_houses_result.scalars().all()
+        for h in all_houses:
+            other_pal = await pre_repo.get_by_house(h.id)
+            if other_pal and other_pal.user_id == callback.from_user.id and not other_pal.is_applied:
+                await callback.answer(
+                    f"❌ Siz allaqachon {h.name} xonadonini band qilgansiz!",
+                    show_alert=True
+                )
+                return
+
+        price_str = await settings_repo.get(f"pre_house_price:{house_id}")
+        price = int(price_str) if price_str else 0
+
+        if price == 0:
+            await callback.answer("❌ Bu xonadon uchun narx belgilanmagan.", show_alert=True)
+            return
+
+        # Foydalanuvchi xonadonining xazinasini tekshirish
+        user_repo = UserRepo(session)
+        user = await user_repo.get_by_id(callback.from_user.id)
+        if not user or not user.house_id:
+            await callback.answer("❌ Siz hali xonadonga qo'shilmagansiz.", show_alert=True)
+            return
+
+        house_repo = HouseRepo(session)
+        user_house = await house_repo.get_by_id(user.house_id)
+        if not user_house or user_house.treasury < price:
+            treasury = user_house.treasury if user_house else 0
+            await callback.answer(
+                f"❌ Xazinada yetarli oltin yo'q!\nKerak: {price:,} | Xazina: {treasury:,}",
+                show_alert=True
+            )
+            return
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="✅ Ha, To'layman",
+                callback_data=f"market:pre_house:confirm:{house_id}"
+            ),
+            InlineKeyboardButton(text="❌ Bekor", callback_data="market:pre_house"),
+        ]
+    ])
+
+    await callback.answer()
+    await callback.message.answer(
+        f"🏰 <b>{house.name}</b> xonadoniga keyingi o'yinda lord sifatida\n"
+        f"kirish uchun <b>{price:,}</b> tanga to'laysizmi?\n\n"
+        f"⚠️ To'lov xonadoningiz xazinasidan chiqariladi.",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("market:pre_house:confirm:"))
+async def market_pre_house_buy_execute(callback: CallbackQuery):
+    """Xonadon band qilish — to'lov amalga oshirish"""
+    house_id = int(callback.data.split(":")[-1])
+
+    async with AsyncSessionFactory() as session:
+        try:
+            from sqlalchemy import select as sa_select
+            from database.models import House as HouseModel
+            house = (await session.execute(
+                sa_select(HouseModel).where(HouseModel.id == house_id)
+            )).scalar_one_or_none()
+
+            if not house:
+                await callback.answer("Xonadon topilmadi.", show_alert=True)
+                return
+
+            pre_repo = PreAssignedLordRepo(session)
+            settings_repo = BotSettingsRepo(session)
+
+            # Yana tekshirish (race condition)
+            pal = await pre_repo.get_by_house(house_id)
+            if pal and not pal.is_applied:
+                await callback.answer("❌ Bu xonadon allaqachon band qilingan!", show_alert=True)
+                return
+
+            price_str = await settings_repo.get(f"pre_house_price:{house_id}")
+            price = int(price_str) if price_str else 0
+
+            user_repo = UserRepo(session)
+            user = await user_repo.get_by_id(callback.from_user.id)
+            if not user or not user.house_id:
+                await callback.answer("❌ Siz hali xonadonga qo'shilmagansiz.", show_alert=True)
+                return
+
+            user_house = (await session.execute(
+                sa_select(HouseModel).where(HouseModel.id == user.house_id)
+            )).scalar_one_or_none()
+
+            if not user_house or user_house.treasury < price:
+                await callback.answer("❌ Xazinada yetarli oltin yo'q!", show_alert=True)
+                return
+
+            # To'lovni amalga oshirish
+            await session.execute(
+                update(HouseModel)
+                .where(HouseModel.id == user.house_id)
+                .values(treasury=HouseModel.treasury - price)
+            )
+            await session.flush()
+
+            # PreAssignedLord yozuvi
+            await pre_repo.set(
+                house_id=house_id,
+                user_id=user.id,
+                username=user.username,
+                full_name=user.full_name,
+                price_paid=price,
+                source="market",
+            )
+            await session.commit()
+
+        except Exception as e:
+            await session.rollback()
+            await callback.answer("❌ Xato yuz berdi. Qayta urinib ko'ring.", show_alert=True)
+            return
+
+    await callback.answer()
+    await callback.message.answer(
+        f"✅ <b>{house.name}</b> xonadoni muvaffaqiyatli band qilindi!\n\n"
+        f"💰 To'langan: <b>{price:,}</b> tanga\n"
+        f"👑 Keyingi o'yin boshlanishida siz lord sifatida tayinlanasiz.",
+        parse_mode="HTML"
+    )
