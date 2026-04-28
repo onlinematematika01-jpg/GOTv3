@@ -38,7 +38,8 @@ def rating_menu_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="🏦 Omonatlar", callback_data="rating:deposit")
     builder.button(text="🗺️ Hududlar Holati", callback_data="rating:regions")
     builder.button(text="⛓️ Asirlar", callback_data="rating:prisoners")
-    builder.adjust(2, 2, 2, 2, 1)
+    builder.button(text="📜 O'yin Tarixi", callback_data="rating:seasons")
+    builder.adjust(2, 2, 2, 2, 2)
     return builder.as_markup()
 
 
@@ -65,6 +66,7 @@ def market_keyboard(custom_items=None) -> InlineKeyboardMarkup:
                 text=f"{item.emoji} {item.name} Sotib Olish",
                 callback_data=f"market:custom:{item.id}"
             )
+    builder.button(text="🏰 Xonadon Oldindan Sotib Olish", callback_data="market:pre_house")
     builder.button(text="📊 Narxlar", callback_data="market:prices")
     builder.adjust(1)
     return builder.as_markup()
@@ -182,6 +184,9 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="⏸ O'yinni Pauza/Davom", callback_data="admin:toggle_pause")
     builder.button(text="🏰 Xonadon Resurslari",  callback_data="admin:house_resources")
     builder.button(text="🎒 Xonadon Itemlari",    callback_data="admin:house_items")
+    builder.button(text="🏰 Kafolatli Xonadon Narxlari", callback_data="admin:pre_house_prices")
+    builder.button(text="👑 Yangi O'yin Lord Tayinlash", callback_data="admin:pre_assign_lord")
+    builder.button(text="🎒 Yangi O'yin Resurslari", callback_data="admin:game_start_resources")
     builder.adjust(2)
     return builder.as_markup()
 
