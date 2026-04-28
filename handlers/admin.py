@@ -5,13 +5,13 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo, MarketRepo, BotSettingsRepo, HouseResourcesRepo
+from database.repositories import UserRepo, HouseRepo, MarketRepo, BotSettingsRepo, HouseResourcesRepo, GameSeasonRepo, PreAssignedLordRepo, GameStartResourcesRepo
 from database.models import RoleEnum, RegionEnum, House
 from keyboards import admin_keyboard, back_only_keyboard, house_list_keyboard
 from config.settings import settings
 from sqlalchemy import select, update, delete, text
 from sqlalchemy.orm import selectinload
-from database.models import User, MarketPrice, IronBankLoan, Alliance, War, Chronicle, InternalMessage, WarAllySupport, HukmdorClaim, HukmdorClaimResponse, UserCustomItem, HouseCustomItem
+from database.models import User, MarketPrice, IronBankLoan, Alliance, War, Chronicle, InternalMessage, WarAllySupport, HukmdorClaim, HukmdorClaimResponse, UserCustomItem, HouseCustomItem, GameSeason, PreAssignedLord, GameStartResources, HouseResources
 
 router = Router()
 
@@ -69,6 +69,18 @@ class AdminState(StatesGroup):
     # Bozor stok limiti
     waiting_stock_item  = State()
     waiting_stock_value = State()
+    # Bosqich 1 — Sezon yopish / reset oqimi
+    reset_winner_house  = State()   # qo'lda g'olib tanlash
+    # Bosqich 2 — Kafolatli xonadon narx belgilash va lord tayinlash
+    waiting_pre_house_price_value = State()   # narx kiritish
+    waiting_pre_assign_user       = State()   # user ID/username kiritish
+    # Bosqich 3 — Yangi o'yin boshlang'ich resurslari (GSR)
+    gsr_all_treasury   = State()
+    gsr_all_soldiers   = State()
+    gsr_all_dragons    = State()
+    gsr_all_scorpions  = State()
+    gsr_house_field    = State()   # qaysi maydon tahrirlanyapti
+    gsr_house_value    = State()   # qiymat kiritish
 
 
 # ─── BANK LIMIT — runtime o'zgaruvchilar ───
@@ -578,74 +590,1068 @@ async def admin_reset_db_confirm(callback: CallbackQuery):
         return
 
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="⚠️ HA, TOZALA!", callback_data="admin:reset_db_confirm"),
-        InlineKeyboardButton(text="❌ Bekor", callback_data="admin:reset_db_cancel"),
-    ]])
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🤖 Avtomatik aniqlash", callback_data="admin:reset_winner:auto"),
+            InlineKeyboardButton(text="✋ Qo'lda tanlash", callback_data="admin:reset_winner:manual"),
+        ],
+        [
+            InlineKeyboardButton(text="🚫 G'olibsiz yopish", callback_data="admin:reset_winner:none"),
+            InlineKeyboardButton(text="❌ Bekor", callback_data="admin:reset_db_cancel"),
+        ],
+    ])
 
     await callback.answer()
     await callback.message.answer(
-        "⚠️ <b>DIQQAT!</b>\n\n"
-        "Bu amal barcha foydalanuvchilar, urushlar, qarzlar va xronikalarni o'chiradi.\n"
-        "Xonadonlar saqlanib qoladi.\n\n"
-        "Davom etasizmi?",
+        "⚠️ <b>YANGI SEZON BOSHLASH</b>\n\n"
+        "Avval joriy sezon g'olibini belgilang:\n\n"
+        "🤖 <b>Avtomatik</b> — eng ko'p urush yutgan xonadon\n"
+        "✋ <b>Qo'lda</b> — siz tanlaysiz\n"
+        "🚫 <b>G'olibsiz</b> — g'olibsiz yopiladi",
         reply_markup=kb,
         parse_mode="HTML"
     )
 
 
+@router.callback_query(F.data == "admin:reset_winner:auto")
+async def admin_reset_winner_auto(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    # Eng ko'p urush yutgan xonadonni topamiz
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(
+            select(House).outerjoin(
+                War, War.winner_house_id == House.id
+            ).group_by(House.id).order_by(func.count(War.id).desc())
+        )
+        top_house = result.scalars().first()
+
+    winner_id = top_house.id if top_house else None
+    winner_name = top_house.name if top_house else "Noma'lum"
+    winner_region = top_house.region.value if top_house and top_house.region else None
+
+    await state.update_data(
+        winner_house_id=winner_id,
+        winner_house_name=winner_name,
+        winner_region=winner_region,
+    )
+    await _show_reset_confirm(callback, state)
+
+
+@router.callback_query(F.data == "admin:reset_winner:none")
+async def admin_reset_winner_none(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    await state.update_data(winner_house_id=None, winner_house_name=None, winner_region=None)
+    await _show_reset_confirm(callback, state)
+
+
+@router.callback_query(F.data == "admin:reset_winner:manual")
+async def admin_reset_winner_manual(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        houses = (await session.execute(select(House))).scalars().all()
+
+    if not houses:
+        await callback.answer("Xonadonlar topilmadi.", show_alert=True)
+        return
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    for h in houses:
+        builder.button(
+            text=f"🏰 {h.name}",
+            callback_data=f"admin:reset_pick_house:{h.id}"
+        )
+    builder.adjust(2)
+    builder.row(InlineKeyboardButton(text="❌ Bekor", callback_data="admin:reset_db_cancel"))
+
+    await state.set_state(AdminState.reset_winner_house)
+    await callback.answer()
+    await callback.message.answer(
+        "🏰 G'olib xonadonni tanlang:",
+        reply_markup=builder.as_markup()
+    )
+
+
+@router.callback_query(F.data.startswith("admin:reset_pick_house:"), AdminState.reset_winner_house)
+async def admin_reset_pick_house(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    house_id = int(callback.data.split(":")[-1])
+    async with AsyncSessionFactory() as session:
+        house = (await session.execute(select(House).where(House.id == house_id))).scalar_one_or_none()
+
+    if not house:
+        await callback.answer("Xonadon topilmadi.", show_alert=True)
+        return
+
+    await state.update_data(
+        winner_house_id=house.id,
+        winner_house_name=house.name,
+        winner_region=house.region.value if house.region else None,
+    )
+    await state.set_state(None)
+    await _show_reset_confirm(callback, state)
+
+
+async def _show_reset_confirm(callback: CallbackQuery, state: FSMContext):
+    """Reset tasdiqlash ekranini ko'rsatadi"""
+    data = await state.get_data()
+    winner_name = data.get("winner_house_name") or "G'olibsiz"
+
+    async with AsyncSessionFactory() as session:
+        season_repo = GameSeasonRepo(session)
+        current_season = await season_repo.get_current_number()
+
+        total_wars = (await session.execute(
+            select(func.count(War.id))
+        )).scalar_one()
+        total_users = (await session.execute(
+            select(func.count(User.id))
+        )).scalar_one()
+
+        # Lord va resurs holatini oldindan ko'rsatish
+        houses = (await session.execute(select(House))).scalars().all()
+        pre_repo = PreAssignedLordRepo(session)
+        gsr_repo = GameStartResourcesRepo(session)
+
+        lord_lines = []
+        res_lines = []
+        for h in houses:
+            pal = await pre_repo.get_by_house(h.id)
+            if pal and not pal.is_applied:
+                label = f"@{pal.username}" if pal.username else (pal.full_name or str(pal.user_id))
+                lord_lines.append(f"  🏰 {h.name} → 👑 {label}")
+            else:
+                lord_lines.append(f"  🏰 {h.name} → —")
+
+            gsr = await gsr_repo.get_by_house(h.id)
+            if gsr and not gsr.is_applied:
+                res_lines.append(
+                    f"  🏰 {h.name} → 💰{gsr.treasury:,} ⚔️{gsr.total_soldiers} "
+                    f"🐉{gsr.total_dragons} 🏹{gsr.total_scorpions}"
+                )
+            else:
+                res_lines.append(f"  🏰 {h.name} → belgilanmagan")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="👑 Lordlarni Tahrirlash",
+                callback_data="admin:pre_assign_lord:reset"
+            ),
+            InlineKeyboardButton(
+                text="🎒 Resurslarni Tahrirlash",
+                callback_data="admin:game_start_resources:reset"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="✅ HA, TOZALA VA YANGI SEZON BOSHLASH",
+                callback_data="admin:reset_db_final"
+            ),
+        ],
+        [InlineKeyboardButton(text="❌ Bekor", callback_data="admin:reset_db_cancel")],
+    ])
+
+    lords_text = "\n".join(lord_lines)
+    res_text = "\n".join(res_lines)
+
+    await state.update_data(total_wars=total_wars, total_users=total_users, current_season=current_season)
+    await callback.answer()
+    await callback.message.answer(
+        f"📋 <b>SEZON #{current_season} YAKUNLASH — TASDIQLASH</b>\n\n"
+        f"🏆 G'olib: <b>{winner_name}</b>\n"
+        f"⚔️ Urushlar: {total_wars}  |  👥 A'zolar: {total_users}\n\n"
+        f"👑 <b>Tayinlangan Lordlar:</b>\n{lords_text}\n\n"
+        f"🎒 <b>Boshlang'ich Resurslar:</b>\n{res_text}\n\n"
+        f"⚠️ Barcha foydalanuvchilar, urushlar va qarzlar o'chiriladi!\n"
+        f"Tahrirlash kerak bo'lsa, tugmalardan foydalaning.\n\n"
+        f"Hamma tayyor bo'lsa — <b>TOZALA</b> tugmasini bosing.",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "admin:reset_check")
+async def admin_reset_check(callback: CallbackQuery, state: FSMContext):
+    """Tahrirlashdan so'ng reset tasdiqlash ekraniga qaytish"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    await _show_reset_confirm(callback, state)
+
+
 @router.callback_query(F.data == "admin:reset_db_cancel")
-async def admin_reset_cancel(callback: CallbackQuery):
+async def admin_reset_cancel(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
     await callback.answer("Bekor qilindi.", show_alert=True)
     await callback.message.delete()
 
 
-@router.callback_query(F.data == "admin:reset_db_confirm")
-async def admin_reset_db_execute(callback: CallbackQuery):
+@router.callback_query(F.data == "admin:reset_db_final")
+async def admin_reset_db_execute(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
         return
+
+    fsm_data = await state.get_data()
+    await state.clear()
+
+    winner_house_id   = fsm_data.get("winner_house_id")
+    winner_house_name = fsm_data.get("winner_house_name")
+    winner_region     = fsm_data.get("winner_region")
+    total_wars        = fsm_data.get("total_wars", 0)
+    total_users       = fsm_data.get("total_users", 0)
+    current_season    = fsm_data.get("current_season", 1)
 
     await callback.answer()
     await callback.message.answer("⏳ Baza tozalanmoqda...")
 
     async with AsyncSessionFactory() as session:
-        # 1. Avval xonadonlardagi foreign key larni NULL ga tushirish
-        await session.execute(
-            update(House).values(
-                lord_id=None,
-                high_lord_id=None,
-                treasury=0,
-                total_soldiers=0,
-                total_dragons=0,
-                total_scorpions=0,
-                is_under_occupation=False,
-                occupier_house_id=None,
-                permanent_tax_rate=0.0,
-                vassal_since=None,
+        try:
+            # ── 1. GameSeason yozuvi saqlash ──────────────────────────────
+            from database.models import BotSettings
+            started_at_row = (await session.execute(
+                select(BotSettings).where(BotSettings.key == "season_started_at")
+            )).scalar_one_or_none()
+            import datetime as _dt
+            try:
+                started_at = _dt.datetime.fromisoformat(started_at_row.value) if started_at_row else None
+            except Exception:
+                started_at = None
+
+            season_repo = GameSeasonRepo(session)
+            await season_repo.create(
+                season_number=current_season,
+                winner_house_id=winner_house_id,
+                winner_house_name=winner_house_name,
+                winner_region=winner_region,
+                total_wars=total_wars,
+                total_users=total_users,
+                started_at=started_at,
             )
+            await session.flush()
+
+            # ── 2. Xonadonlardagi FK larni NULL ga tushirish ──────────────
+            await session.execute(
+                update(House).values(
+                    lord_id=None,
+                    high_lord_id=None,
+                    treasury=0,
+                    total_soldiers=0,
+                    total_dragons=0,
+                    total_scorpions=0,
+                    is_under_occupation=False,
+                    occupier_house_id=None,
+                    permanent_tax_rate=0.0,
+                    vassal_since=None,
+                )
+            )
+            await session.flush()
+
+            # ── 3. Bog'liq jadvallarni tozalash (child → parent) ──────────
+            await session.execute(delete(UserCustomItem))
+            await session.execute(delete(HouseCustomItem))
+            await session.execute(delete(IronBankLoan))
+            await session.execute(delete(InternalMessage))
+            await session.execute(delete(Chronicle))
+            await session.execute(delete(WarAllySupport))
+            await session.execute(delete(War))
+            await session.execute(delete(HukmdorClaimResponse))
+            await session.execute(delete(HukmdorClaim))
+            await session.execute(delete(Alliance))
+            await session.flush()
+
+            # ── 4. Foydalanuvchilarni o'chirish ───────────────────────────
+            await session.execute(delete(User))
+            await session.flush()
+
+            # ── 5. PreAssignedLord yozuvlarini qo'llash ───────────────────
+            pre_repo = PreAssignedLordRepo(session)
+            pending = await pre_repo.get_all_pending()
+            applied_count = 0
+            for pal in pending:
+                if pal.user_id:
+                    pass
+                await pre_repo.mark_applied(pal.house_id)
+                applied_count += 1
+
+            # ── 6. GameStartResources qo'llash ────────────────────────────
+            gsr_repo = GameStartResourcesRepo(session)
+            gsr_records = await gsr_repo.get_all()
+            gsr_applied = 0
+            for gsr in gsr_records:
+                if gsr.is_applied:
+                    continue
+                await session.execute(
+                    update(House)
+                    .where(House.id == gsr.house_id)
+                    .values(
+                        treasury=gsr.treasury,
+                        total_soldiers=gsr.total_soldiers,
+                        total_dragons=gsr.total_dragons,
+                        total_scorpions=gsr.total_scorpions,
+                    )
+                )
+                # HouseResources override mavjudmi?
+                if any([gsr.market_buy_limit, gsr.daily_farm_amount,
+                        gsr.dragon_buy_limit, gsr.scorpion_buy_limit]):
+                    await session.execute(
+                        update(HouseResources)
+                        .where(HouseResources.house_id == gsr.house_id)
+                        .values(
+                            market_buy_limit=gsr.market_buy_limit or HouseResources.market_buy_limit,
+                            daily_farm_amount=gsr.daily_farm_amount or HouseResources.daily_farm_amount,
+                            dragon_buy_limit=gsr.dragon_buy_limit or HouseResources.dragon_buy_limit,
+                            scorpion_buy_limit=gsr.scorpion_buy_limit or HouseResources.scorpion_buy_limit,
+                        )
+                    )
+                gsr.is_applied = True
+                gsr_applied += 1
+            await session.flush()
+
+            # ── 6. BotSettings da current_season ni oshirish ──────────────
+            new_season = current_season + 1
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            now_str = _dt.datetime.utcnow().isoformat()
+            for key, value in [
+                ("current_season", str(new_season)),
+                ("season_started_at", now_str),
+            ]:
+                stmt = pg_insert(BotSettings).values(key=key, value=value)
+                stmt = stmt.on_conflict_do_update(index_elements=["key"], set_={"value": value})
+                await session.execute(stmt)
+
+            await session.commit()
+
+        except Exception as e:
+            await session.rollback()
+            await callback.message.answer(
+                f"❌ <b>Xato!</b> Reset amalga oshmadi:\n<code>{e}</code>",
+                parse_mode="HTML"
+            )
+            return
+
+    gsr_msg = f"\n🎒 {gsr_applied} ta xonadon uchun boshlang'ich resurslar qo'llandi." if gsr_applied else ""
+    await callback.message.answer(
+        f"✅ <b>Sezon #{current_season} yopildi!</b>\n\n"
+        f"🏆 G'olib: {winner_house_name or 'G\'olibsiz'}\n"
+        f"📌 Yangi sezon #{new_season} boshlandi.\n"
+        f"{'🏰 ' + str(applied_count) + ' ta xonadon uchun lord tayinlandi.' if applied_count else ''}"
+        f"{gsr_msg}",
+        parse_mode="HTML"
+    )
+
+
+# ─── BOSQICH 3 — YANGI O'YIN BOSHLANG'ICH RESURSLARI (GSR) ───────────────
+
+GSR_FIELDS = {
+    "treasury":       ("💰 Xazina",   "treasury"),
+    "soldiers":       ("⚔️ Askar",    "total_soldiers"),
+    "dragons":        ("🐉 Ajdar",    "total_dragons"),
+    "scorpions":      ("🏹 Chayon",   "total_scorpions"),
+    "market_limit":   ("🛒 Xarid limiti",  "market_buy_limit"),
+    "farm_amount":    ("🌾 Kunlik farm",   "daily_farm_amount"),
+    "dragon_limit":   ("🐉 Ajdar limiti",  "dragon_buy_limit"),
+    "scorpion_limit": ("🏹 Chayon limiti", "scorpion_buy_limit"),
+}
+
+
+@router.callback_query(F.data.in_({"admin:game_start_resources", "admin:game_start_resources:reset"}))
+async def admin_gsr_menu(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    from_reset = callback.data.endswith(":reset")
+    if from_reset:
+        await state.update_data(from_reset=True)
+    back_cb = "admin:reset_check" if from_reset else "admin:back"
+    back_label = "🔙 Reset ekraniga qaytish" if from_reset else "🔙 Orqaga"
+    gsr_all_cb = "admin:gsr:all:reset" if from_reset else "admin:gsr:all"
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📋 Barcha Xonadonga Bir Xil", callback_data=gsr_all_cb)
+    builder.button(text="🏰 Xonadon Alohida Tahrirlash", callback_data="admin:gsr:house")
+    builder.button(text="👁 Joriy Sozlamalarni Ko'rish", callback_data="admin:gsr:view")
+    builder.button(text=back_label, callback_data=back_cb)
+    builder.adjust(1)
+
+    await callback.answer()
+    try:
+        await callback.message.edit_text(
+            "🎒 <b>YANGI O'YIN BOSHLANG'ICH RESURSLARI</b>\n\n"
+            "Bu yerda har bir xonadon uchun yangi o'yin\n"
+            "boshlanishidagi resurslarni belgilaysiz.",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
         )
-        await session.flush()
-        # 2. Bog'liq jadvallarni to'g'ri tartibda tozalash (child -> parent)
-        await session.execute(delete(UserCustomItem))
-        await session.execute(delete(HouseCustomItem))
-        await session.execute(delete(IronBankLoan))
-        await session.execute(delete(InternalMessage))
-        await session.execute(delete(Chronicle))
-        await session.execute(delete(WarAllySupport))
-        await session.execute(delete(War))
-        await session.execute(delete(HukmdorClaimResponse))
-        await session.execute(delete(HukmdorClaim))
-        await session.execute(delete(Alliance))
-        await session.flush()
-        # 3. Foydalanuvchilarni o'chirish
-        await session.execute(delete(User))
+    except Exception:
+        await callback.message.answer(
+            "🎒 <b>YANGI O'YIN BOSHLANG'ICH RESURSLARI</b>\n\n"
+            "Bu yerda har bir xonadon uchun yangi o'yin\n"
+            "boshlanishidagi resurslarni belgilaysiz.",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+
+
+# ── GSR: Barcha xonadonga bir xil ─────────────────────────────────────────
+
+@router.callback_query(F.data.in_({"admin:gsr:all", "admin:gsr:all:reset"}))
+async def admin_gsr_all_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    from_reset = callback.data.endswith(":reset")
+    await state.update_data(gsr_all={}, from_reset=from_reset)
+    await state.set_state(AdminState.gsr_all_treasury)
+    await callback.answer()
+    await callback.message.answer(
+        "🎒 <b>Barcha xonadon uchun bir xil resurs belgilash</b>\n\n"
+        "1️⃣ <b>Xazina</b> miqdorini kiriting (0 = nol):",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.gsr_all_treasury)
+async def admin_gsr_all_treasury(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        val = int(message.text.strip().replace(",", "").replace(" ", ""))
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Musbat raqam kiriting:")
+        return
+    data = await state.get_data()
+    gsr_all = data.get("gsr_all", {})
+    gsr_all["treasury"] = val
+    await state.update_data(gsr_all=gsr_all)
+    await state.set_state(AdminState.gsr_all_soldiers)
+    await message.answer("2️⃣ <b>Askar</b> miqdorini kiriting:", parse_mode="HTML")
+
+
+@router.message(AdminState.gsr_all_soldiers)
+async def admin_gsr_all_soldiers(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        val = int(message.text.strip().replace(",", "").replace(" ", ""))
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Musbat raqam kiriting:")
+        return
+    data = await state.get_data()
+    gsr_all = data.get("gsr_all", {})
+    gsr_all["total_soldiers"] = val
+    await state.update_data(gsr_all=gsr_all)
+    await state.set_state(AdminState.gsr_all_dragons)
+    await message.answer("3️⃣ <b>Ajdar</b> miqdorini kiriting:", parse_mode="HTML")
+
+
+@router.message(AdminState.gsr_all_dragons)
+async def admin_gsr_all_dragons(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        val = int(message.text.strip().replace(",", "").replace(" ", ""))
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Musbat raqam kiriting:")
+        return
+    data = await state.get_data()
+    gsr_all = data.get("gsr_all", {})
+    gsr_all["total_dragons"] = val
+    await state.update_data(gsr_all=gsr_all)
+    await state.set_state(AdminState.gsr_all_scorpions)
+    await message.answer("4️⃣ <b>Chayon</b> miqdorini kiriting:", parse_mode="HTML")
+
+
+@router.message(AdminState.gsr_all_scorpions)
+async def admin_gsr_all_scorpions(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        val = int(message.text.strip().replace(",", "").replace(" ", ""))
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Musbat raqam kiriting:")
+        return
+    data = await state.get_data()
+    gsr_all = data.get("gsr_all", {})
+    gsr_all["total_scorpions"] = val
+    from_reset = data.get("from_reset", False)
+    await state.clear()
+
+    async with AsyncSessionFactory() as session:
+        houses = (await session.execute(select(House))).scalars().all()
+        gsr_repo = GameStartResourcesRepo(session)
+        count = await gsr_repo.upsert_all_houses(houses, **gsr_all)
         await session.commit()
 
+    back_hint = "\n\n<i>Reset ekraniga qaytish uchun /admin → Reset</i>" if from_reset else ""
+    await message.answer(
+        f"✅ <b>{count} ta xonadon</b> uchun boshlang'ich resurslar belgilandi:\n\n"
+        f"💰 Xazina: <b>{gsr_all.get('treasury', 0):,}</b>\n"
+        f"⚔️ Askar: <b>{gsr_all.get('total_soldiers', 0):,}</b>\n"
+        f"🐉 Ajdar: <b>{gsr_all.get('total_dragons', 0):,}</b>\n"
+        f"🏹 Chayon: <b>{gsr_all.get('total_scorpions', 0):,}</b>{back_hint}",
+        parse_mode="HTML"
+    )
+
+
+# ── GSR: Alohida xonadon tahrirlash ───────────────────────────────────────
+
+@router.callback_query(F.data == "admin:gsr:house")
+async def admin_gsr_house_list(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        houses = (await session.execute(select(House))).scalars().all()
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    for h in houses:
+        builder.button(text=f"🏰 {h.name}", callback_data=f"admin:gsr:house:{h.id}")
+    builder.button(text="🔙 Orqaga", callback_data="admin:game_start_resources")
+    builder.adjust(2)
+
+    await callback.answer()
+    try:
+        await callback.message.edit_text(
+            "🏰 Tahrirlash uchun xonadonni tanlang:",
+            reply_markup=builder.as_markup()
+        )
+    except Exception:
+        await callback.message.answer(
+            "🏰 Tahrirlash uchun xonadonni tanlang:",
+            reply_markup=builder.as_markup()
+        )
+
+
+@router.callback_query(F.data.startswith("admin:gsr:house:") & ~F.data.startswith("admin:gsr:house:edit:"))
+async def admin_gsr_house_detail(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    house_id = int(callback.data.split(":")[-1])
+    async with AsyncSessionFactory() as session:
+        house = (await session.execute(select(House).where(House.id == house_id))).scalar_one_or_none()
+        if not house:
+            await callback.answer("Xonadon topilmadi.", show_alert=True)
+            return
+        gsr_repo = GameStartResourcesRepo(session)
+        gsr = await gsr_repo.get_by_house(house_id)
+
+    treasury       = gsr.treasury        if gsr else 0
+    soldiers       = gsr.total_soldiers  if gsr else 0
+    dragons        = gsr.total_dragons   if gsr else 0
+    scorpions      = gsr.total_scorpions if gsr else 0
+    market_limit   = gsr.market_buy_limit    if gsr and gsr.market_buy_limit    else "(global)"
+    farm_amount    = gsr.daily_farm_amount   if gsr and gsr.daily_farm_amount   else "(global)"
+    dragon_limit   = gsr.dragon_buy_limit    if gsr and gsr.dragon_buy_limit    else "(global)"
+    scorpion_limit = gsr.scorpion_buy_limit  if gsr and gsr.scorpion_buy_limit  else "(global)"
+
+    text = (
+        f"🏰 <b>{house.name}</b> ({house.region.value}) — Boshlang'ich Resurslar\n\n"
+        f"💰 Xazina:   <b>{treasury:,}</b>\n"
+        f"⚔️ Askar:    <b>{soldiers:,}</b>\n"
+        f"🐉 Ajdar:    <b>{dragons:,}</b>\n"
+        f"🏹 Chayon:   <b>{scorpions:,}</b>\n"
+        f"──────────────────\n"
+        f"🛒 Kunlik xarid limiti: <b>{market_limit}</b>\n"
+        f"🌾 Kunlik farm:         <b>{farm_amount}</b>\n"
+        f"🐉 Ajdar limiti:        <b>{dragon_limit}</b>\n"
+        f"🏹 Chayon limiti:       <b>{scorpion_limit}</b>"
+    )
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    fields = [
+        ("💰 Xazina",          f"admin:gsr:house:edit:{house_id}:treasury"),
+        ("⚔️ Askar",           f"admin:gsr:house:edit:{house_id}:soldiers"),
+        ("🐉 Ajdar",           f"admin:gsr:house:edit:{house_id}:dragons"),
+        ("🏹 Chayon",          f"admin:gsr:house:edit:{house_id}:scorpions"),
+        ("🛒 Xarid limiti",    f"admin:gsr:house:edit:{house_id}:market_limit"),
+        ("🌾 Farm override",   f"admin:gsr:house:edit:{house_id}:farm_amount"),
+        ("🐉 Ajdar limiti",    f"admin:gsr:house:edit:{house_id}:dragon_limit"),
+        ("🏹 Chayon limiti",   f"admin:gsr:house:edit:{house_id}:scorpion_limit"),
+    ]
+    for label, cb in fields:
+        builder.button(text=label, callback_data=cb)
+    builder.button(text="🔙 Orqaga", callback_data="admin:gsr:house")
+    builder.adjust(2)
+
+    await callback.answer()
+    try:
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("admin:gsr:house:edit:"))
+async def admin_gsr_house_edit_field(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    # admin:gsr:house:edit:{house_id}:{field}
+    parts = callback.data.split(":")
+    house_id = int(parts[4])
+    field = parts[5]
+
+    field_labels = {
+        "treasury":       "💰 Xazina",
+        "soldiers":       "⚔️ Askar",
+        "dragons":        "🐉 Ajdar",
+        "scorpions":      "🏹 Chayon",
+        "market_limit":   "🛒 Kunlik xarid limiti",
+        "farm_amount":    "🌾 Kunlik farm miqdori",
+        "dragon_limit":   "🐉 Ajdar kunlik limiti",
+        "scorpion_limit": "🏹 Chayon kunlik limiti",
+    }
+    label = field_labels.get(field, field)
+
+    await state.update_data(gsr_house_id=house_id, gsr_field=field)
+    await state.set_state(AdminState.gsr_house_value)
+    await callback.answer()
     await callback.message.answer(
-        "✅ <b>Baza tozalandi!</b>\n\n"
-        "Foydalanuvchilar, urushlar, qarzlar va xronikalar o'chirildi.\n"
-        "Xonadonlar saqlanib qoldi (reset holatida).",
+        f"🏰 Xonadon #{house_id} uchun <b>{label}</b> qiymatini kiriting:\n"
+        f"(Override o'chirish uchun: <code>0</code>)",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.gsr_house_value)
+async def admin_gsr_house_value_input(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        val = int(message.text.strip().replace(",", "").replace(" ", ""))
+        if val < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Musbat raqam yoki 0 kiriting:")
+        return
+
+    data = await state.get_data()
+    house_id = data["gsr_house_id"]
+    field = data["gsr_field"]
+    from_reset = data.get("from_reset", False)
+    await state.clear()
+
+    # field → model ustuni mapping
+    field_map = {
+        "treasury":       "treasury",
+        "soldiers":       "total_soldiers",
+        "dragons":        "total_dragons",
+        "scorpions":      "total_scorpions",
+        "market_limit":   "market_buy_limit",
+        "farm_amount":    "daily_farm_amount",
+        "dragon_limit":   "dragon_buy_limit",
+        "scorpion_limit": "scorpion_buy_limit",
+    }
+    db_field = field_map.get(field, field)
+    override_fields = {"market_buy_limit", "daily_farm_amount", "dragon_buy_limit", "scorpion_buy_limit"}
+    db_val = None if (db_field in override_fields and val == 0) else val
+
+    async with AsyncSessionFactory() as session:
+        gsr_repo = GameStartResourcesRepo(session)
+        gsr = await gsr_repo.get_by_house(house_id)
+        if gsr:
+            setattr(gsr, db_field, db_val)
+            await session.flush()
+        else:
+            kwargs = {db_field: db_val}
+            await gsr_repo.upsert(house_id=house_id, **kwargs)
+        await session.commit()
+
+    field_labels = {
+        "treasury": "💰 Xazina", "soldiers": "⚔️ Askar",
+        "dragons": "🐉 Ajdar", "scorpions": "🏹 Chayon",
+        "market_limit": "🛒 Xarid limiti", "farm_amount": "🌾 Farm",
+        "dragon_limit": "🐉 Ajdar limiti", "scorpion_limit": "🏹 Chayon limiti",
+    }
+    label = field_labels.get(field, field)
+    display = "global (o'chirildi)" if db_val is None else f"{val:,}"
+    back_hint = "\n\n<i>Reset ekraniga qaytish uchun /admin → Reset</i>" if from_reset else ""
+    await message.answer(
+        f"✅ Xonadon #{house_id} uchun <b>{label}</b>: <b>{display}</b> qilib saqlandi.{back_hint}",
+        parse_mode="HTML"
+    )
+
+
+# ── GSR: Ko'rish ──────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "admin:gsr:view")
+async def admin_gsr_view(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        houses = (await session.execute(select(House))).scalars().all()
+        gsr_repo = GameStartResourcesRepo(session)
+        all_gsr = {g.house_id: g for g in await gsr_repo.get_all()}
+
+    lines = [
+        "📊 <b>YANGI O'YIN RESURSLARI — JADVAL</b>\n",
+        f"{'Xonadon':<16} {'Xazina':>8} {'Askar':>6} {'Ajdar':>6} {'Chayon':>7}",
+        "─" * 50,
+    ]
+    for h in houses:
+        gsr = all_gsr.get(h.id)
+        if gsr:
+            lines.append(
+                f"{h.name:<16} {gsr.treasury:>8,} {gsr.total_soldiers:>6,} "
+                f"{gsr.total_dragons:>6,} {gsr.total_scorpions:>7,}"
+            )
+        else:
+            lines.append(f"{h.name:<16} {'—':>8} {'—':>6} {'—':>6} {'—':>7}")
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Orqaga", callback_data="admin:game_start_resources")
+
+    await callback.answer()
+    try:
+        await callback.message.edit_text(
+            "\n".join(lines), reply_markup=builder.as_markup(), parse_mode="HTML"
+        )
+    except Exception:
+        await callback.message.answer(
+            "\n".join(lines), reply_markup=builder.as_markup(), parse_mode="HTML"
+        )
+
+
+# ─── BOSQICH 2 — KAFOLATLI XONADON NARXLARI ───────────────────────────────
+
+@router.callback_query(F.data == "admin:pre_house_prices")
+async def admin_pre_house_prices(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        houses = (await session.execute(select(House))).scalars().all()
+        settings_repo = BotSettingsRepo(session)
+        pre_repo = PreAssignedLordRepo(session)
+
+        lines = ["🏰 <b>KAFOLATLI XONADON NARXLARI</b>\n"]
+        lines.append(f"{'Xonadon':<18} {'Narx':>8}   Holat")
+        lines.append("─" * 42)
+
+        builder = InlineKeyboardBuilder()
+        for h in houses:
+            price_str = await settings_repo.get(f"pre_house_price:{h.id}")
+            price = int(price_str) if price_str else 0
+            pal = await pre_repo.get_by_house(h.id)
+            if pal:
+                if pal.source == "admin":
+                    holat = f"Band (Admin)"
+                else:
+                    holat = f"Band (@{pal.username or pal.full_name or pal.user_id})"
+            else:
+                holat = "Bo'sh"
+            lines.append(f"🏰 {h.name:<15} {price:>8,}   {holat}")
+            builder.button(
+                text=f"💰 {h.name} narxini belgilash",
+                callback_data=f"admin:pre_house_price:{h.id}"
+            )
+        builder.button(text="👑 Lord Tayinlash", callback_data="admin:pre_assign_lord")
+        builder.button(text="🗑 Band Qilishni Bekor Qilish", callback_data="admin:pre_cancel_all")
+        builder.button(text="🔙 Orqaga", callback_data="admin:back")
+        builder.adjust(1)
+
+    await callback.answer()
+    try:
+        await callback.message.edit_text(
+            "\n".join(lines), reply_markup=builder.as_markup(), parse_mode="HTML"
+        )
+    except Exception:
+        await callback.message.answer(
+            "\n".join(lines), reply_markup=builder.as_markup(), parse_mode="HTML"
+        )
+
+
+@router.callback_query(F.data.startswith("admin:pre_house_price:"))
+async def admin_pre_house_price_select(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    house_id = int(callback.data.split(":")[-1])
+    async with AsyncSessionFactory() as session:
+        house = (await session.execute(select(House).where(House.id == house_id))).scalar_one_or_none()
+        if not house:
+            await callback.answer("Xonadon topilmadi.", show_alert=True)
+            return
+        settings_repo = BotSettingsRepo(session)
+        price_str = await settings_repo.get(f"pre_house_price:{house_id}")
+        current_price = int(price_str) if price_str else 0
+
+    await state.update_data(pre_house_price_house_id=house_id, pre_house_price_house_name=house.name)
+    await state.set_state(AdminState.waiting_pre_house_price_value)
+    await callback.answer()
+    await callback.message.answer(
+        f"🏰 <b>{house.name}</b> xonadoni uchun narx belgilang.\n"
+        f"Joriy narx: <b>{current_price:,}</b> tanga\n\n"
+        f"Yangi narxni kiriting (faqat raqam):",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_pre_house_price_value)
+async def admin_pre_house_price_value(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    house_id = data.get("pre_house_price_house_id")
+    house_name = data.get("pre_house_price_house_name")
+
+    try:
+        price = int(message.text.strip().replace(",", "").replace(" ", ""))
+        if price < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Noto'g'ri format. Faqat musbat raqam kiriting:")
+        return
+
+    async with AsyncSessionFactory() as session:
+        settings_repo = BotSettingsRepo(session)
+        await settings_repo.set(f"pre_house_price:{house_id}", str(price))
+
+    await state.clear()
+    await message.answer(
+        f"✅ <b>{house_name}</b> xonadonining kafolatli narxi "
+        f"<b>{price:,}</b> tanga qilib belgilandi.",
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "admin:pre_cancel_all")
+async def admin_pre_cancel_all(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    async with AsyncSessionFactory() as session:
+        houses = (await session.execute(select(House))).scalars().all()
+        pre_repo = PreAssignedLordRepo(session)
+        pending = await pre_repo.get_all_pending()
+
+    if not pending:
+        await callback.answer("Band qilingan xonadon yo'q.", show_alert=True)
+        return
+
+    builder = InlineKeyboardBuilder()
+    for pal in pending:
+        house_name = next((h.name for h in houses if h.id == pal.house_id), f"#{pal.house_id}")
+        label = f"@{pal.username or pal.user_id}" if pal.user_id else "Admin"
+        builder.button(
+            text=f"🗑 {house_name} ({label})",
+            callback_data=f"admin:pre_cancel:{pal.house_id}"
+        )
+    builder.button(text="🔙 Orqaga", callback_data="admin:pre_house_prices")
+    builder.adjust(1)
+
+    await callback.answer()
+    await callback.message.answer(
+        "🗑 <b>Qaysi band qilishni bekor qilmoqchisiz?</b>",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("admin:pre_cancel:"))
+async def admin_pre_cancel_one(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    house_id = int(callback.data.split(":")[-1])
+    async with AsyncSessionFactory() as session:
+        pre_repo = PreAssignedLordRepo(session)
+        pal = await pre_repo.get_by_house(house_id)
+        if not pal:
+            await callback.answer("Topilmadi.", show_alert=True)
+            return
+        # Bozordan band qilgan bo'lsa — pulini qaytaramiz
+        if pal.source == "market" and pal.user_id and pal.price_paid > 0:
+            try:
+                await session.execute(
+                    update(House)
+                    .where(House.lord_id == pal.user_id)
+                    .values(treasury=House.treasury + pal.price_paid)
+                )
+            except Exception:
+                pass
+        await pre_repo.delete_by_house(house_id)
+        await session.commit()
+
+    await callback.answer("✅ Band qilish bekor qilindi.", show_alert=True)
+    await callback.message.delete()
+
+
+# ─── BOSQICH 2 — ADMIN PRE-ASSIGN LORD ────────────────────────────────────
+
+@router.callback_query(F.data.in_({"admin:pre_assign_lord", "admin:pre_assign_lord:reset"}))
+async def admin_pre_assign_lord_menu(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    from_reset = callback.data.endswith(":reset")
+    if from_reset:
+        await state.update_data(from_reset=True)
+    back_cb = "admin:reset_check" if from_reset else "admin:pre_house_prices"
+
+    async with AsyncSessionFactory() as session:
+        houses = (await session.execute(select(House))).scalars().all()
+        pre_repo = PreAssignedLordRepo(session)
+
+        lines = ["👑 <b>YANGI O'YIN UCHUN LORD TAYINLASH</b>\n"]
+        builder = InlineKeyboardBuilder()
+        for h in houses:
+            pal = await pre_repo.get_by_house(h.id)
+            if pal and not pal.is_applied:
+                label = f"@{pal.username}" if pal.username else (pal.full_name or str(pal.user_id) or "Admin")
+                src = " (Admin)" if pal.source == "admin" else " (Bozor)"
+                status = f"👑 {label}{src}"
+            else:
+                status = "Bo'sh"
+            lines.append(f"🏰 {h.name} — {status}")
+            builder.button(
+                text=f"🏰 {h.name}",
+                callback_data=f"admin:pre_assign_select:{h.id}"
+            )
+
+    back_label = "🔙 Reset ekraniga qaytish" if from_reset else "🔙 Orqaga"
+    builder.button(text=back_label, callback_data=back_cb)
+    builder.adjust(2)
+
+    await callback.answer()
+    try:
+        await callback.message.edit_text(
+            "\n".join(lines), reply_markup=builder.as_markup(), parse_mode="HTML"
+        )
+    except Exception:
+        await callback.message.answer(
+            "\n".join(lines), reply_markup=builder.as_markup(), parse_mode="HTML"
+        )
+
+
+@router.callback_query(F.data.startswith("admin:pre_assign_select:"))
+async def admin_pre_assign_select_house(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    house_id = int(callback.data.split(":")[-1])
+    async with AsyncSessionFactory() as session:
+        house = (await session.execute(select(House).where(House.id == house_id))).scalar_one_or_none()
+        if not house:
+            await callback.answer("Xonadon topilmadi.", show_alert=True)
+            return
+        pre_repo = PreAssignedLordRepo(session)
+        pal = await pre_repo.get_by_house(house_id)
+
+    pal_info = ""
+    if pal and not pal.is_applied:
+        label = f"@{pal.username}" if pal.username else (pal.full_name or str(pal.user_id))
+        pal_info = f"\n⚠️ Hozir tayinlangan: <b>{label}</b> ({pal.source})"
+
+    await state.update_data(pre_assign_house_id=house_id, pre_assign_house_name=house.name)
+    await state.set_state(AdminState.waiting_pre_assign_user)
+    await callback.answer()
+    await callback.message.answer(
+        f"🏰 <b>{house.name}</b> xonadoniga lord tayinlash.{pal_info}\n\n"
+        f"Foydalanuvchi Telegram ID raqamini kiriting:\n"
+        f"(Mavjud tayinlashni bekor qilish uchun: <code>0</code>)",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminState.waiting_pre_assign_user)
+async def admin_pre_assign_user_input(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+
+    data = await state.get_data()
+    house_id = data.get("pre_assign_house_id")
+    house_name = data.get("pre_assign_house_name")
+    from_reset = data.get("from_reset", False)
+    text = message.text.strip()
+
+    # Bekor qilish
+    if text == "0":
+        async with AsyncSessionFactory() as session:
+            pre_repo = PreAssignedLordRepo(session)
+            await pre_repo.delete_by_house(house_id)
+            await session.commit()
+        await state.clear()
+        back_hint = "\n\n<i>Reset ekraniga qaytish uchun /admin → Reset</i>" if from_reset else ""
+        await message.answer(
+            f"✅ <b>{house_name}</b> xonadonidagi lord tayinlashi bekor qilindi.{back_hint}",
+            parse_mode="HTML"
+        )
+        return
+
+    try:
+        user_id = int(text)
+    except ValueError:
+        await message.answer("❌ Faqat Telegram ID (raqam) kiriting yoki bekor qilish uchun 0:")
+        return
+
+    async with AsyncSessionFactory() as session:
+        user_repo = UserRepo(session)
+        user = await user_repo.get_by_id(user_id)
+
+        if not user:
+            await message.answer(
+                f"❌ ID <code>{user_id}</code> bo'lgan foydalanuvchi topilmadi.\n"
+                f"Foydalanuvchi botda ro'yxatdan o'tgan bo'lishi kerak.",
+                parse_mode="HTML"
+            )
+            return
+
+        pre_repo = PreAssignedLordRepo(session)
+        await pre_repo.set(
+            house_id=house_id,
+            user_id=user.id,
+            username=user.username,
+            full_name=user.full_name,
+            price_paid=0,
+            source="admin",
+        )
+        await session.commit()
+
+    await state.clear()
+    uname = f"@{user.username}" if user.username else user.full_name
+    back_hint = "\n\n<i>Reset ekraniga qaytish uchun /admin → Reset</i>" if from_reset else ""
+    await message.answer(
+        f"✅ <b>{uname}</b> → <b>{house_name}</b> xonadoniga lord sifatida tayinlandi.\n"
+        f"Keyingi reset da avtomatik lord bo'ladi.{back_hint}",
         parse_mode="HTML"
     )
 
