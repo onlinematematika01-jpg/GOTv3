@@ -581,6 +581,82 @@ class TerritoryGarrison(Base):
     hukmdor_house = relationship("House", foreign_keys=[hukmdor_house_id])
 
 
+# ─────────────────────────────────────────────────
+# BOSQICH 3 — YANGI O'YIN BOSHLANG'ICH RESURSLARI
+# ─────────────────────────────────────────────────
+
+class GameStartResources(Base):
+    """
+    Har bir xonadon uchun yangi o'yin boshidagi
+    boshlang'ich resurs qiymatlari.
+    Reset bo'lganda House jadvaliga ko'chiriladi.
+    """
+    __tablename__ = "game_start_resources"
+
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    house_id       = Column(Integer, ForeignKey("houses.id"), nullable=False, unique=True)
+
+    # Xonadon resurslari
+    treasury       = Column(BigInteger, default=0)        # Boshlang'ich xazina
+    total_soldiers = Column(Integer, default=0)           # Boshlang'ich askar
+    total_dragons  = Column(Integer, default=0)           # Boshlang'ich ajdar
+    total_scorpions = Column(Integer, default=0)          # Boshlang'ich chayon
+
+    # HouseResources limit overridelar (ixtiyoriy)
+    market_buy_limit    = Column(Integer, nullable=True)  # None = global default
+    daily_farm_amount   = Column(Integer, nullable=True)
+    dragon_buy_limit    = Column(Integer, nullable=True)
+    scorpion_buy_limit  = Column(Integer, nullable=True)
+
+    is_applied   = Column(Boolean, default=False)
+    updated_at   = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    house = relationship("House", foreign_keys=[house_id])
+
+
+# ─────────────────────────────────────────────────
+# BOSQICH 1 — O'YIN TARIXI VA PRE-ASSIGN LORD
+# ─────────────────────────────────────────────────
+
+class GameSeason(Base):
+    """Har bir o'yin sezoni uchun tarixiy yozuv"""
+    __tablename__ = "game_seasons"
+
+    id                = Column(Integer, primary_key=True, autoincrement=True)
+    season_number     = Column(Integer, nullable=False)           # 1, 2, 3 ...
+    winner_house_id   = Column(Integer, ForeignKey("houses.id"), nullable=True)
+    winner_house_name = Column(String(128), nullable=True)        # reset dan keyin ham ko'rinsin
+    winner_region     = Column(String(64), nullable=True)         # RegionEnum.value
+    total_wars        = Column(Integer, default=0)                # o'yin davomida bo'lgan urushlar
+    total_users       = Column(Integer, default=0)                # o'yindagi jami a'zolar
+    started_at        = Column(DateTime, nullable=True)
+    ended_at          = Column(DateTime, server_default=func.now())
+    notes             = Column(Text, nullable=True)               # admin izohi (ixtiyoriy)
+
+    winner_house = relationship("House", foreign_keys=[winner_house_id])
+
+
+class PreAssignedLord(Base):
+    """
+    Admin reset qilishdan OLDIN yangi o'yin uchun
+    xonadonga lord tayinlaydi. Reset bo'lgach bu yozuvlar
+    bozordagi xonadon 'band' holatini boshqaradi.
+    """
+    __tablename__ = "pre_assigned_lords"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    house_id   = Column(Integer, ForeignKey("houses.id"), nullable=False, unique=True)
+    user_id    = Column(BigInteger, nullable=True)       # Telegram ID (reset dan oldin)
+    username   = Column(String(64), nullable=True)       # @username
+    full_name  = Column(String(128), nullable=True)
+    price_paid = Column(BigInteger, default=0)           # kafolatli narx to'landi (0 = admin tayinladi)
+    source     = Column(String(16), default="admin")     # "admin" | "market"
+    is_applied = Column(Boolean, default=False)          # reset da avtomatik qo'llanildimi
+    created_at = Column(DateTime, server_default=func.now())
+
+    house = relationship("House", foreign_keys=[house_id])
+
+
 class DailyPurchase(Base):
     """Foydalanuvchining bugungi xaridlari"""
     __tablename__ = "daily_purchases"
