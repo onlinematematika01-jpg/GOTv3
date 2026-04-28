@@ -1166,7 +1166,7 @@ async def admin_gsr_house_list(callback: CallbackQuery):
         )
 
 
-@router.callback_query(F.data.startswith("admin:gsr:house:") & ~F.data.startswith("admin:gsr:house:edit:"))
+@router.callback_query(F.data.startswith("admin:gsr:house:") & ~F.data.startswith("admin:gsr:house:edit:") & ~F.data.startswith("admin:gsr:house:items:"))
 async def admin_gsr_house_detail(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
