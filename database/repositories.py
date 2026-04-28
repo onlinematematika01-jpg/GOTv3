@@ -8,6 +8,7 @@ from database.models import (
     RoleEnum, RegionEnum, WarStatusEnum,
     AllianceGroup, AllianceGroupMember, AllianceGroupInvite,
     HouseResources, TerritoryGarrison, DailyPurchase,
+    GameSeason, PreAssignedLord, GameStartResources,
 )
 from typing import Optional, List
 import math
@@ -1994,3 +1995,236 @@ class DailyPurchaseRepo:
         )
         await self.session.flush()
         return result.rowcount
+
+
+# ─────────────────────────────────────────────────
+# BOSQICH 1 — YANGI REPOLAR
+# ─────────────────────────────────────────────────
+
+class GameSeasonRepo:
+    """O'yin sezoni tarixi bilan ishlash"""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create(
+        self,
+        season_number: int,
+        winner_house_id: Optional[int] = None,
+        winner_house_name: Optional[str] = None,
+        winner_region: Optional[str] = None,
+        total_wars: int = 0,
+        total_users: int = 0,
+        started_at=None,
+        notes: Optional[str] = None,
+    ) -> GameSeason:
+        season = GameSeason(
+            season_number=season_number,
+            winner_house_id=winner_house_id,
+            winner_house_name=winner_house_name,
+            winner_region=winner_region,
+            total_wars=total_wars,
+            total_users=total_users,
+            started_at=started_at,
+            notes=notes,
+        )
+        self.session.add(season)
+        await self.session.flush()
+        return season
+
+    async def get_all(self) -> list[GameSeason]:
+        result = await self.session.execute(
+            select(GameSeason).order_by(GameSeason.season_number)
+        )
+        return result.scalars().all()
+
+    async def get_current_number(self) -> int:
+        """BotSettings dan joriy sezon raqamini o'qiydi"""
+        from database.models import BotSettings
+        result = await self.session.execute(
+            select(BotSettings).where(BotSettings.key == "current_season")
+        )
+        row = result.scalar_one_or_none()
+        return int(row.value if row else "1")
+
+
+class PreAssignedLordRepo:
+    """Keyingi sezon uchun oldindan lord tayinlash"""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def set(
+        self,
+        house_id: int,
+        user_id: Optional[int] = None,
+        username: Optional[str] = None,
+        full_name: Optional[str] = None,
+        price_paid: int = 0,
+        source: str = "admin",
+    ) -> PreAssignedLord:
+        """Yangi yozuv qo'shadi yoki mavjudini yangilaydi"""
+        result = await self.session.execute(
+            select(PreAssignedLord).where(PreAssignedLord.house_id == house_id)
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.user_id = user_id
+            existing.username = username
+            existing.full_name = full_name
+            existing.price_paid = price_paid
+            existing.source = source
+            existing.is_applied = False
+            await self.session.flush()
+            return existing
+        record = PreAssignedLord(
+            house_id=house_id,
+            user_id=user_id,
+            username=username,
+            full_name=full_name,
+            price_paid=price_paid,
+            source=source,
+        )
+        self.session.add(record)
+        await self.session.flush()
+        return record
+
+    async def get_by_house(self, house_id: int) -> Optional[PreAssignedLord]:
+        result = await self.session.execute(
+            select(PreAssignedLord).where(PreAssignedLord.house_id == house_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_all_pending(self) -> list[PreAssignedLord]:
+        """is_applied=False bo'lgan barcha yozuvlar"""
+        result = await self.session.execute(
+            select(PreAssignedLord).where(PreAssignedLord.is_applied == False)
+        )
+        return result.scalars().all()
+
+    async def mark_applied(self, house_id: int) -> None:
+        await self.session.execute(
+            update(PreAssignedLord)
+            .where(PreAssignedLord.house_id == house_id)
+            .values(is_applied=True)
+        )
+        await self.session.flush()
+
+    async def delete_by_house(self, house_id: int) -> None:
+        from sqlalchemy import delete as sa_delete
+        await self.session.execute(
+            sa_delete(PreAssignedLord).where(PreAssignedLord.house_id == house_id)
+        )
+        await self.session.flush()
+
+
+class GameStartResourcesRepo:
+    """Yangi o'yin boshlang'ich resurslari bilan ishlash"""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def upsert(
+        self,
+        house_id: int,
+        treasury: int = 0,
+        total_soldiers: int = 0,
+        total_dragons: int = 0,
+        total_scorpions: int = 0,
+        market_buy_limit: Optional[int] = None,
+        daily_farm_amount: Optional[int] = None,
+        dragon_buy_limit: Optional[int] = None,
+        scorpion_buy_limit: Optional[int] = None,
+    ) -> GameStartResources:
+        result = await self.session.execute(
+            select(GameStartResources).where(GameStartResources.house_id == house_id)
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.treasury        = treasury
+            existing.total_soldiers  = total_soldiers
+            existing.total_dragons   = total_dragons
+            existing.total_scorpions = total_scorpions
+            existing.market_buy_limit   = market_buy_limit
+            existing.daily_farm_amount  = daily_farm_amount
+            existing.dragon_buy_limit   = dragon_buy_limit
+            existing.scorpion_buy_limit = scorpion_buy_limit
+            existing.is_applied = False
+            await self.session.flush()
+            return existing
+        gsr = GameStartResources(
+            house_id=house_id,
+            treasury=treasury,
+            total_soldiers=total_soldiers,
+            total_dragons=total_dragons,
+            total_scorpions=total_scorpions,
+            market_buy_limit=market_buy_limit,
+            daily_farm_amount=daily_farm_amount,
+            dragon_buy_limit=dragon_buy_limit,
+            scorpion_buy_limit=scorpion_buy_limit,
+        )
+        self.session.add(gsr)
+        await self.session.flush()
+        return gsr
+
+    async def get_by_house(self, house_id: int) -> Optional[GameStartResources]:
+        result = await self.session.execute(
+            select(GameStartResources).where(GameStartResources.house_id == house_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_all(self) -> list[GameStartResources]:
+        result = await self.session.execute(select(GameStartResources))
+        return result.scalars().all()
+
+    async def upsert_all_houses(
+        self,
+        houses: list[House],
+        treasury: int = 0,
+        total_soldiers: int = 0,
+        total_dragons: int = 0,
+        total_scorpions: int = 0,
+        market_buy_limit: Optional[int] = None,
+        daily_farm_amount: Optional[int] = None,
+        dragon_buy_limit: Optional[int] = None,
+        scorpion_buy_limit: Optional[int] = None,
+    ) -> int:
+        """Barcha xonadonlarga bir xil qiymat yozadi. Nechta yozuv bo'lganini qaytaradi."""
+        count = 0
+        for h in houses:
+            await self.upsert(
+                house_id=h.id,
+                treasury=treasury,
+                total_soldiers=total_soldiers,
+                total_dragons=total_dragons,
+                total_scorpions=total_scorpions,
+                market_buy_limit=market_buy_limit,
+                daily_farm_amount=daily_farm_amount,
+                dragon_buy_limit=dragon_buy_limit,
+                scorpion_buy_limit=scorpion_buy_limit,
+            )
+            count += 1
+        return count
+
+    async def mark_all_applied(self) -> None:
+        await self.session.execute(
+            update(GameStartResources).values(is_applied=True)
+        )
+        await self.session.flush()
+
+    async def reset_all(self) -> None:
+        """Yangi sezon uchun is_applied=False, qiymatlar nolga"""
+        await self.session.execute(
+            update(GameStartResources).values(
+                is_applied=False,
+                treasury=0,
+                total_soldiers=0,
+                total_dragons=0,
+                total_scorpions=0,
+                market_buy_limit=None,
+                daily_farm_amount=None,
+                dragon_buy_limit=None,
+                scorpion_buy_limit=None,
+            )
+        )
+        await self.session.flush()
