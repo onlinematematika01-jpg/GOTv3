@@ -12,7 +12,6 @@ GUIDE_TEXT = {
         "🐉 <b>Jang mexanikasi</b> — 3 round tizimi, resurslar\n"
         "🤝 <b>Diplomatiya</b> — ittifoqlar, yordam turlari\n"
         "🛒 <b>Bozor</b> — resurslar va custom qurollar\n"
-        "⛓️ <b>Asirlar</b> — asirlik qoidalari\n"
         "👑 <b>Rollar</b> — vakolatlar va unvonlar"
     ),
 
@@ -87,18 +86,6 @@ GUIDE_TEXT = {
         "⚠️ Faqat xonadon lordi xazinadan xarid qila oladi."
     ),
 
-    "asir": (
-        "⛓️ <b>ASIRLAR QO'LLANMASI</b>\n\n"
-        "<b>Asirlik cheklovlari:</b>\n"
-        "• Asir lord urush e'lon qila olmaydi\n"
-        "• Ba'zi amallarga kirish cheklangan\n\n"
-        "<b>Ozod qilish:</b>\n"
-        "G'olibning lordi asirni ozod qilishi yoki to'lov talab qilishi mumkin.\n\n"
-        "<b>Execute (o'ldirish):</b>\n"
-        "Asirni o'ldirsa — o'sha xonadon 'o'ldirilgan lord' belgisiga ega bo'ladi.\n"
-        "Bu belgili xonadonga istalgan lord hududdan qat'i nazar urush e'lon qila oladi!\n\n"
-        "⚠️ Asirlikda urush e'lon qilib bo'lmaydi! Avval ozod bo'lish kerak."
-    ),
 
     "rollar": (
         "👑 <b>ROLLAR VA VAKOLATLAR</b>\n\n"
@@ -166,9 +153,6 @@ async def guide_bozor(callback: CallbackQuery):
     )
 
 
-@router.callback_query(F.data == "guide:asir")
-async def guide_asir(callback: CallbackQuery):
-    await callback.answer()
     await callback.message.edit_text(
         GUIDE_TEXT["asir"],
         reply_markup=guide_keyboard(back=True),
