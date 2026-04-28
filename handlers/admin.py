@@ -6,13 +6,13 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command
 from database.engine import AsyncSessionFactory
-from database.repositories import UserRepo, HouseRepo, MarketRepo, BotSettingsRepo, HouseResourcesRepo, GameSeasonRepo, PreAssignedLordRepo, GameStartResourcesRepo
+from database.repositories import UserRepo, HouseRepo, MarketRepo, BotSettingsRepo, HouseResourcesRepo, GameSeasonRepo, PreAssignedLordRepo, GameStartResourcesRepo, GameStartCustomItemRepo, CustomItemRepo
 from database.models import RoleEnum, RegionEnum, House
 from keyboards import admin_keyboard, back_only_keyboard, house_list_keyboard
 from config.settings import settings
 from sqlalchemy import select, update, delete, text
 from sqlalchemy.orm import selectinload
-from database.models import User, MarketPrice, IronBankLoan, Alliance, War, Chronicle, InternalMessage, WarAllySupport, HukmdorClaim, HukmdorClaimResponse, UserCustomItem, HouseCustomItem, GameSeason, PreAssignedLord, GameStartResources, HouseResources
+from database.models import User, MarketPrice, IronBankLoan, Alliance, War, Chronicle, InternalMessage, WarAllySupport, HukmdorClaim, HukmdorClaimResponse, UserCustomItem, HouseCustomItem, GameSeason, PreAssignedLord, GameStartResources, HouseResources, GameStartCustomItem
 
 router = Router()
 
@@ -82,6 +82,7 @@ class AdminState(StatesGroup):
     gsr_all_scorpions  = State()
     gsr_house_field    = State()   # qaysi maydon tahrirlanyapti
     gsr_house_value    = State()   # qiymat kiritish
+    gsr_custom_qty     = State()   # custom item miqdor kiritish
 
 
 # ─── BANK LIMIT — runtime o'zgaruvchilar ───
@@ -918,6 +919,26 @@ async def admin_reset_db_execute(callback: CallbackQuery, state: FSMContext):
                     )
                 gsr.is_applied = True
                 gsr_applied += 1
+
+            # ── 6b. GameStartCustomItems qo'llash ─────────────────────────
+            gsr_ci_repo = GameStartCustomItemRepo(session)
+            all_ci_entries = await gsr_ci_repo.get_all()
+            for entry in all_ci_entries:
+                result = await session.execute(
+                    select(HouseCustomItem).where(
+                        HouseCustomItem.house_id == entry.house_id,
+                        HouseCustomItem.item_id  == entry.item_id,
+                    )
+                )
+                existing_hci = result.scalar_one_or_none()
+                if existing_hci:
+                    existing_hci.quantity = entry.quantity
+                else:
+                    session.add(HouseCustomItem(
+                        house_id=entry.house_id,
+                        item_id=entry.item_id,
+                        quantity=entry.quantity,
+                    ))
             await session.flush()
 
             # ── 6. BotSettings da current_season ni oshirish ──────────────
@@ -1195,6 +1216,7 @@ async def admin_gsr_house_detail(callback: CallbackQuery):
     ]
     for label, cb in fields:
         builder.button(text=label, callback_data=cb)
+    builder.button(text="🎒 Custom Itemlar", callback_data=f"admin:gsr:house:items:{house_id}")
     builder.button(text="🔙 Orqaga", callback_data="admin:gsr:house")
     builder.adjust(2)
 
@@ -1295,6 +1317,138 @@ async def admin_gsr_house_value_input(message: Message, state: FSMContext):
         f"✅ Xonadon #{house_id} uchun <b>{label}</b>: <b>{display}</b> qilib saqlandi.{back_hint}",
         parse_mode="HTML"
     )
+
+
+# ── GSR: Custom Itemlar ────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("admin:gsr:house:items:"))
+async def admin_gsr_custom_items_list(callback: CallbackQuery):
+    """Xonadon uchun GSR custom item ro'yxati va tahrirlash"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    house_id = int(callback.data.split(":")[-1])
+    async with AsyncSessionFactory() as session:
+        house = (await session.execute(select(House).where(House.id == house_id))).scalar_one_or_none()
+        if not house:
+            await callback.answer("Xonadon topilmadi.", show_alert=True)
+            return
+        gsr_ci_repo = GameStartCustomItemRepo(session)
+        ci_repo = CustomItemRepo(session)
+        assigned = await gsr_ci_repo.get_by_house(house_id)          # (GSRCustomItem, CustomItem)
+        all_items = await ci_repo.get_all_active()
+
+    # Tayinlangan itemlar xaritasi {item_id: qty}
+    assigned_map = {gci.item_id: gci.quantity for gci, _ in assigned}
+
+    lines = [f"🎒 <b>{house.name}</b> — Boshlang'ich Custom Itemlar\n"]
+    if assigned:
+        for gci, ci in assigned:
+            lines.append(f"  {ci.emoji} {ci.name}: <b>{gci.quantity}</b> dona")
+    else:
+        lines.append("  <i>Hech qanday item tayinlanmagan</i>")
+
+    text = "\n".join(lines)
+    builder = InlineKeyboardBuilder()
+
+    # Mavjud itemlar uchun tahrirlash tugmalari
+    for ci in all_items:
+        qty = assigned_map.get(ci.id, 0)
+        label = f"{ci.emoji} {ci.name} ({qty})"
+        builder.button(
+            text=label,
+            callback_data=f"admin:gsr:ci:edit:{house_id}:{ci.id}"
+        )
+    builder.button(text="🔙 Orqaga", callback_data=f"admin:gsr:house:{house_id}")
+    builder.adjust(1)
+
+    await callback.answer()
+    try:
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("admin:gsr:ci:edit:"))
+async def admin_gsr_custom_item_edit(callback: CallbackQuery, state: FSMContext):
+    """Miqdor kiritish uchun so'rash"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    # admin:gsr:ci:edit:{house_id}:{item_id}
+    parts = callback.data.split(":")
+    house_id = int(parts[4])
+    item_id  = int(parts[5])
+
+    async with AsyncSessionFactory() as session:
+        from database.models import CustomItem
+        ci = (await session.execute(select(CustomItem).where(CustomItem.id == item_id))).scalar_one_or_none()
+        gsr_ci_repo = GameStartCustomItemRepo(session)
+        all_assigned = await gsr_ci_repo.get_all_items_for_house(house_id)
+        existing = next((x for x in all_assigned if x.item_id == item_id), None)
+        current_qty = existing.quantity if existing else 0
+
+    item_name = f"{ci.emoji} {ci.name}" if ci else f"Item #{item_id}"
+    await state.update_data(gsr_ci_house_id=house_id, gsr_ci_item_id=item_id)
+    await state.set_state(AdminState.gsr_custom_qty)
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Bekor qilish", callback_data=f"admin:gsr:house:items:{house_id}")
+    await callback.answer()
+    try:
+        await callback.message.edit_text(
+            f"🎒 <b>{item_name}</b>\n"
+            f"Joriy miqdor: <b>{current_qty}</b>\n\n"
+            f"Yangi miqdorni kiriting (0 = o'chirish):",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+    except Exception:
+        await callback.message.answer(
+            f"🎒 <b>{item_name}</b>\n"
+            f"Joriy miqdor: <b>{current_qty}</b>\n\n"
+            f"Yangi miqdorni kiriting (0 = o'chirish):",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+
+
+@router.message(AdminState.gsr_custom_qty)
+async def admin_gsr_custom_qty_input(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        qty = int(message.text.strip())
+        if qty < 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Musbat raqam yoki 0 kiriting:")
+        return
+
+    data = await state.get_data()
+    house_id = data["gsr_ci_house_id"]
+    item_id  = data["gsr_ci_item_id"]
+    await state.clear()
+
+    async with AsyncSessionFactory() as session:
+        gsr_ci_repo = GameStartCustomItemRepo(session)
+        if qty == 0:
+            await gsr_ci_repo.delete(house_id, item_id)
+            await session.commit()
+            await message.answer("🗑 Item o'chirildi.", parse_mode="HTML")
+        else:
+            await gsr_ci_repo.upsert(house_id, item_id, qty)
+            await session.commit()
+            from database.models import CustomItem
+            async with AsyncSessionFactory() as s2:
+                ci = (await s2.execute(select(CustomItem).where(CustomItem.id == item_id))).scalar_one_or_none()
+            name = f"{ci.emoji} {ci.name}" if ci else f"Item #{item_id}"
+            await message.answer(
+                f"✅ <b>{name}</b>: <b>{qty}</b> dona saqlandi.",
+                parse_mode="HTML"
+            )
 
 
 # ── GSR: Ko'rish ──────────────────────────────────────────────────────────
