@@ -2228,3 +2228,59 @@ class GameStartResourcesRepo:
             )
         )
         await self.session.flush()
+
+
+class GameStartCustomItemRepo:
+    """O'yin boshi uchun custom item tayinlamalari"""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_by_house(self, house_id: int):
+        from database.models import GameStartCustomItem, CustomItem
+        result = await self.session.execute(
+            select(GameStartCustomItem, CustomItem)
+            .join(CustomItem, CustomItem.id == GameStartCustomItem.item_id)
+            .where(GameStartCustomItem.house_id == house_id)
+        )
+        return result.all()
+
+    async def get_all_items_for_house(self, house_id: int):
+        from database.models import GameStartCustomItem
+        result = await self.session.execute(
+            select(GameStartCustomItem).where(GameStartCustomItem.house_id == house_id)
+        )
+        return result.scalars().all()
+
+    async def upsert(self, house_id: int, item_id: int, quantity: int):
+        from database.models import GameStartCustomItem
+        result = await self.session.execute(
+            select(GameStartCustomItem).where(
+                GameStartCustomItem.house_id == house_id,
+                GameStartCustomItem.item_id == item_id,
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.quantity = quantity
+            await self.session.flush()
+            return existing
+        entry = GameStartCustomItem(house_id=house_id, item_id=item_id, quantity=quantity)
+        self.session.add(entry)
+        await self.session.flush()
+        return entry
+
+    async def delete(self, house_id: int, item_id: int):
+        from database.models import GameStartCustomItem
+        await self.session.execute(
+            delete(GameStartCustomItem).where(
+                GameStartCustomItem.house_id == house_id,
+                GameStartCustomItem.item_id == item_id,
+            )
+        )
+        await self.session.flush()
+
+    async def get_all(self):
+        from database.models import GameStartCustomItem
+        result = await self.session.execute(select(GameStartCustomItem))
+        return result.scalars().all()
