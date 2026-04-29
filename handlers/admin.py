@@ -3788,8 +3788,9 @@ async def admin_house_resources_select(callback: CallbackQuery):
     house_id = int(callback.data.split(":")[2])
 
     async with AsyncSessionFactory() as session:
-        house_repo = HouseRepo(session)
-        res_repo   = HouseResourcesRepo(session)
+        house_repo   = HouseRepo(session)
+        res_repo     = HouseResourcesRepo(session)
+        custom_repo  = CustomItemRepo(session)
 
         house = await house_repo.get_by_id(house_id)
         if not house:
@@ -3798,6 +3799,23 @@ async def admin_house_resources_select(callback: CallbackQuery):
 
         res = await res_repo.get_or_create(house_id)
         await session.commit()
+
+        # Xonadonga tegishli custom itemlarni olish
+        from database.models import HouseCustomItem
+        from sqlalchemy import select as _sel
+        hci_rows = (await session.execute(
+            _sel(HouseCustomItem).where(HouseCustomItem.house_id == house_id)
+        )).scalars().all()
+
+        custom_items_text = ""
+        if hci_rows:
+            lines_ci = []
+            for hci in hci_rows:
+                item = await custom_repo.get_by_id(hci.item_id)
+                if item:
+                    lines_ci.append(f"  {item.emoji} {item.name}: <b>{hci.quantity}</b> ta")
+            if lines_ci:
+                custom_items_text = "\n🎒 Custom itemlar:\n" + "\n".join(lines_ci) + "\n"
 
     text = (
         f"🏰 <b>{house.name}</b> — Resurs sozlamalari\n\n"
@@ -3808,6 +3826,7 @@ async def admin_house_resources_select(callback: CallbackQuery):
         f"🐉 Kunlik ajdar limiti: <b>{res.dragon_buy_limit}</b>\n"
         f"🏹 Kunlik skorpion limiti: <b>{res.scorpion_buy_limit}</b>\n"
         f"⚔️ Kunlik custom item limiti: <b>{res.item_buy_limit}</b>\n"
+        f"{custom_items_text}"
     )
     await callback.answer()
     await callback.message.edit_text(
