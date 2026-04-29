@@ -32,6 +32,7 @@ async def _build_market_text(user_id: int):
         house_repo = HouseRepo(session)
         market_repo = MarketRepo(session)
         custom_repo = CustomItemRepo(session)
+        cfg = BotSettingsRepo(session)
 
         user = await user_repo.get_by_id(user_id)
         prices = await market_repo.get_all_prices()
@@ -42,13 +43,28 @@ async def _build_market_text(user_id: int):
             house = await house_repo.get_by_id(user.house_id)
             treasury = house.treasury if house else 0
 
+        # Standart qurollar stokini olish
+        _stock_keys = {"soldier": "soldier_stock", "dragon": "dragon_stock", "scorpion": "scorpion_stock"}
+        stocks = {}
+        for key, setting_key in _stock_keys.items():
+            raw = await cfg.get(setting_key)
+            stocks[key] = int(raw) if raw and raw.strip().isdigit() else None
+
+    def _stock_text(key):
+        s = stocks.get(key)
+        if s is None:
+            return ""
+        if s == 0:
+            return " ❌ <i>Tugadi</i>"
+        return f" (qoldi: <b>{s:,}</b>)"
+
     lines = [
         "🛒 <b>BOZOR</b>\n",
         f"💰 Xonadon xazinasi: <b>{treasury:,}</b> tanga\n",
         "─── Standart qurollar ───",
-        f"🗡️ Askar: <b>{prices.get('soldier', 1)}</b> tanga/dona",
-        f"🐉 Ajdar: <b>{prices.get('dragon', 150)}</b> tanga/dona",
-        f"🏹 Skorpion: <b>{prices.get('scorpion', 25)}</b> tanga/dona",
+        f"🗡️ Askar: <b>{prices.get('soldier', 1)}</b> tanga/dona{_stock_text('soldier')}",
+        f"🐉 Ajdar: <b>{prices.get('dragon', 150)}</b> tanga/dona{_stock_text('dragon')}",
+        f"🏹 Skorpion: <b>{prices.get('scorpion', 25)}</b> tanga/dona{_stock_text('scorpion')}",
     ]
 
     if custom_items:
@@ -229,7 +245,7 @@ async def _do_purchase(message, bot, user_id: int, item: str, qty: int, state: F
         async with AsyncSessionFactory() as _ss:
             _cfg = _BSR(_ss)
             _stock_raw = await _cfg.get(_stock_keys[item])
-            _stock_limit = int(_stock_raw) if _stock_raw else None
+            _stock_limit = int(_stock_raw) if _stock_raw and _stock_raw.strip().isdigit() else None
 
         if _stock_limit is not None and _stock_limit < qty:
             _item_labels = {"soldier": "🗡️ Askar", "dragon": "🐉 Ajdar", "scorpion": "🏹 Skorpion"}
@@ -285,7 +301,7 @@ async def _do_purchase(message, bot, user_id: int, item: str, qty: int, state: F
             new_stock = max(0, _stock_limit - qty)
             async with AsyncSessionFactory() as _ss2:
                 _cfg2 = _BSR2(_ss2)
-                await _cfg2.set(_stock_keys[item], str(new_stock) if new_stock > 0 else "")
+                await _cfg2.set(_stock_keys[item], str(new_stock))
 
         item_label = ITEM_NAMES.get(item, item)
         await message.answer(
