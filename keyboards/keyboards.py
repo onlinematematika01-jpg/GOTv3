@@ -338,7 +338,7 @@ def deploy_confirm_keyboard(war_id: int) -> InlineKeyboardMarkup:
 
 
 
-def guide_keyboarddef guide_keyboard(back: bool = False) -> InlineKeyboardMarkup:
+def guide_keyboard(back: bool = False) -> InlineKeyboardMarkup:
     """O'yin qo'llanmasi bo'limlari klaviaturasi"""
     builder = InlineKeyboardBuilder()
     if back:
