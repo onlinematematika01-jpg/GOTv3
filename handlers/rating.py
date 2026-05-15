@@ -1,3 +1,4 @@
+import html as _html
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramBadRequest
@@ -110,12 +111,12 @@ def _build_power_page(data: list, page: int) -> str:
         rank = start + i
         item_line = ""
         if items:
-            parts = [f"{r.item.emoji}{r.item.name}×{r.quantity}" for r in items]
+            parts = [f"{r.item.emoji}{_html.escape(str(r.item.name) or "")}×{r.quantity}" for r in items]
             item_line = f"\n   🎯 {', '.join(parts)}"
             if item_atk > 0 or item_def > 0:
                 item_line += f" (+{item_atk}⚔️ +{item_def}🛡)"
         lines.append(
-            f"{get_medal(rank)} <b>{row.name}</b>\n"
+            f"{get_medal(rank)} <b>{_html.escape(str(row.name) or "")}</b>\n"
             f"   ⚡ {total_power:,}  |  🗡️ {row.total_soldiers:,}  🐉 {row.total_dragons}  🏹 {row.total_scorpions}"
             + item_line
         )
@@ -126,7 +127,7 @@ def _build_soldiers_page(data: list, page: int) -> str:
     start = page * PAGE_SIZE
     lines = ["🗡️ <b>ASKARLAR REYTINGI</b>\n"]
     for i, row in enumerate(data[start: start + PAGE_SIZE]):
-        lines.append(f"{get_medal(start + i)} <b>{row.name}</b>\n   🗡️ {row.total_soldiers:,} askar")
+        lines.append(f"{get_medal(start + i)} <b>{_html.escape(str(row.name) or "")}</b>\n   🗡️ {row.total_soldiers:,} askar")
     return "\n".join(lines)
 
 
@@ -134,7 +135,7 @@ def _build_gold_page(data: list, page: int) -> str:
     start = page * PAGE_SIZE
     lines = ["💰 <b>OLTIN REYTINGI</b>\n"]
     for i, row in enumerate(data[start: start + PAGE_SIZE]):
-        lines.append(f"{get_medal(start + i)} <b>{row.name}</b>\n   💰 {row.treasury:,} oltin")
+        lines.append(f"{get_medal(start + i)} <b>{_html.escape(str(row.name) or "")}</b>\n   💰 {row.treasury:,} oltin")
     return "\n".join(lines)
 
 
@@ -143,7 +144,7 @@ def _build_dragons_page(data: list, page: int) -> str:
     lines = ["🐉 <b>JANGCHILAR REYTINGI</b>\n"]
     for i, row in enumerate(data[start: start + PAGE_SIZE]):
         lines.append(
-            f"{get_medal(start + i)} <b>{row.name}</b>\n"
+            f"{get_medal(start + i)} <b>{_html.escape(str(row.name) or "")}</b>\n"
             f"   🐉 {row.total_dragons} ajdar  |  🏹 {row.total_scorpions} skorpion"
         )
     return "\n".join(lines)
@@ -164,7 +165,7 @@ def _build_alliances_page(data: list, page: int) -> str:
         group = entry["group"]
         member_names = " · ".join(entry["member_names"])
         lines.append(
-            f"{get_medal(start + i)} <b>{group.name}</b>\n"
+            f"{get_medal(start + i)} <b>{_html.escape(str(group.name) or "")}</b>\n"
             f"   ⚡ {entry['power']:,} kuch  |  👥 {entry['member_count']} xonadon\n"
             f"   🗡️ {entry['total_soldiers']:,}  🐉 {entry['total_dragons']}  🏹 {entry['total_scorpions']}\n"
             f"   <i>{member_names}</i>"
