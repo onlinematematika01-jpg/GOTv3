@@ -1,3 +1,4 @@
+import html as _html
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -76,7 +77,7 @@ async def _build_market_text(user_id: int):
                     stock_text = " ❌ <i>Tugadi</i>"
                 else:
                     stock_text = f" (qoldi: <b>{item.stock_remaining}</b>)"
-            lines.append(f"{item.emoji} {item.name}: <b>{item.price:,}</b> tanga/dona{stock_text}")
+            lines.append(f"{item.emoji} {_html.escape(str(item.name) or "")}: <b>{item.price:,}</b> tanga/dona{stock_text}")
 
     lines.append("\n📌 Nima sotib olmoqchisiz?")
     lines.append("⚠️ Faqat xonadon lordi xazinadan xarid qila oladi.")
@@ -127,7 +128,7 @@ async def show_prices(callback: CallbackQuery):
             stock_text = ""
             if item.stock_remaining is not None:
                 stock_text = f" | qoldi: {item.stock_remaining}" if item.stock_remaining > 0 else " | ❌ Tugadi"
-            lines.append(f"{item.emoji} {item.name}: {item.price:,} tanga{stock_text}")
+            lines.append(f"{item.emoji} {_html.escape(str(item.name) or "")}: {item.price:,} tanga{stock_text}")
 
     await callback.answer()
     await callback.message.edit_text(
@@ -319,7 +320,7 @@ async def _do_purchase(message, bot, user_id: int, item: str, qty: int, state: F
             await post_to_chronicle(
                 bot,
                 f"🛒 <b>BOZOR XABARI</b>\n\n"
-                f"🏰 <b>{house.name}</b> xonadoni\n"
+                f"🏰 <b>{_html.escape(str(house.name) or "")}</b> xonadoni\n"
                 f"{item_label}: +{qty} ta sotib oldi\n"
                 f"💰 Sarflandi: {total_cost:,} tanga"
             ,
@@ -424,7 +425,7 @@ async def _do_custom_purchase(message, bot, user_id: int, item_id: int, qty: int
         if item.stock_remaining is not None:
             if item.stock_remaining == 0:
                 await message.answer(
-                    f"❌ <b>{item.emoji} {item.name}</b> tugab ketdi! Stokda qolmadi.",
+                    f"❌ <b>{item.emoji} {_html.escape(str(item.name) or "")}</b> tugab ketdi! Stokda qolmadi.",
                     reply_markup=back_only_keyboard("market:back"),
                     parse_mode="HTML"
                 )
@@ -470,7 +471,7 @@ async def _do_custom_purchase(message, bot, user_id: int, item_id: int, qty: int
 
         await message.answer(
             f"✅ <b>Muvaffaqiyatli sotib olindi!</b>\n\n"
-            f"{item.emoji} {item.name}: +{qty} ta\n"
+            f"{item.emoji} {_html.escape(str(item.name) or "")}: +{qty} ta\n"
             f"💰 Sarflandi: {total_cost:,} tanga\n"
             f"💰 Xazina qoldig'i: {house.treasury - total_cost:,} tanga"
             + stock_info,
@@ -484,8 +485,8 @@ async def _do_custom_purchase(message, bot, user_id: int, item_id: int, qty: int
             await post_to_chronicle(
                 bot,
                 f"🛒 <b>BOZOR XABARI</b>\n\n"
-                f"🏰 <b>{house.name}</b> xonadoni\n"
-                f"{item.emoji} {item.name}: +{qty} ta sotib oldi\n"
+                f"🏰 <b>{_html.escape(str(house.name) or "")}</b> xonadoni\n"
+                f"{item.emoji} {_html.escape(str(item.name) or "")}: +{qty} ta sotib oldi\n"
                 f"💰 Sarflandi: {total_cost:,} tanga"
                 + (f"\n📦 Stokda qoldi: {item.stock_remaining - qty} ta" if item.stock_remaining is not None else "")
             ,
@@ -541,22 +542,22 @@ async def market_pre_house_list(callback: CallbackQuery):
 
             if pal and not pal.is_applied:
                 if pal.user_id == callback.from_user.id:
-                    lines.append(f"🏰 {h.name} ({h.region.value}) — {price:,} 💰  ✅ Siz band qilgansiz")
+                    lines.append(f"🏰 {_html.escape(str(h.name) or "")} ({h.region.value}) — {price:,} 💰  ✅ Siz band qilgansiz")
                 else:
-                    lines.append(f"🏰 {h.name} ({h.region.value}) — {price:,} 💰  👑 BAND")
+                    lines.append(f"🏰 {_html.escape(str(h.name) or "")} ({h.region.value}) — {price:,} 💰  👑 BAND")
             else:
                 if price == 0:
-                    lines.append(f"🏰 {h.name} ({h.region.value}) — Narx belgilanmagan")
+                    lines.append(f"🏰 {_html.escape(str(h.name) or "")} ({h.region.value}) — Narx belgilanmagan")
                 else:
-                    lines.append(f"🏰 {h.name} ({h.region.value}) — {price:,} 💰")
+                    lines.append(f"🏰 {_html.escape(str(h.name) or "")} ({h.region.value}) — {price:,} 💰")
                     builder.button(
-                        text=f"🏰 {h.name} — {price:,} 💰",
+                        text=f"🏰 {_html.escape(str(h.name) or "")} — {price:,} 💰",
                         callback_data=f"market:pre_house:buy:{h.id}"
                     )
 
     if my_pal:
         pal, house = my_pal
-        lines.append(f"\n✅ Siz <b>{house.name}</b> xonadonini band qilgansiz.")
+        lines.append(f"\n✅ Siz <b>{_html.escape(str(house.name) or "")}</b> xonadonini band qilgansiz.")
 
     builder.button(text="🔙 Bozor", callback_data="market:back")
     builder.adjust(1)
@@ -603,7 +604,7 @@ async def market_pre_house_buy_confirm(callback: CallbackQuery):
             other_pal = await pre_repo.get_by_house(h.id)
             if other_pal and other_pal.user_id == callback.from_user.id and not other_pal.is_applied:
                 await callback.answer(
-                    f"❌ Siz allaqachon {h.name} xonadonini band qilgansiz!",
+                    f"❌ Siz allaqachon {_html.escape(str(h.name) or "")} xonadonini band qilgansiz!",
                     show_alert=True
                 )
                 return
@@ -645,7 +646,7 @@ async def market_pre_house_buy_confirm(callback: CallbackQuery):
 
     await callback.answer()
     await callback.message.answer(
-        f"🏰 <b>{house.name}</b> xonadoniga keyingi o'yinda lord sifatida\n"
+        f"🏰 <b>{_html.escape(str(house.name) or "")}</b> xonadoniga keyingi o'yinda lord sifatida\n"
         f"kirish uchun <b>{price:,}</b> tanga to'laysizmi?\n\n"
         f"⚠️ To'lov xonadoningiz xazinasidan chiqariladi.",
         reply_markup=kb,
@@ -722,7 +723,7 @@ async def market_pre_house_buy_execute(callback: CallbackQuery):
 
     await callback.answer()
     await callback.message.answer(
-        f"✅ <b>{house.name}</b> xonadoni muvaffaqiyatli band qilindi!\n\n"
+        f"✅ <b>{_html.escape(str(house.name) or "")}</b> xonadoni muvaffaqiyatli band qilindi!\n\n"
         f"💰 To'langan: <b>{price:,}</b> tanga\n"
         f"👑 Keyingi o'yin boshlanishida siz lord sifatida tayinlanasiz.",
         parse_mode="HTML"
