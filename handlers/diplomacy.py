@@ -1,3 +1,4 @@
+import html as _html
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -73,12 +74,12 @@ async def group_menu(callback: CallbackQuery):
 
         if in_group:
             member_lines = "\n".join(
-                f"  {'👑' if m.house_id == group.leader_house_id else '⚔️'} {m.house.name}"
+                f"  {'👑' if m.house_id == group.leader_house_id else '⚔️'} {_html.escape(str(m.house.name) or "")}"
                 for m in group.members
             )
             text = (
                 f"🏰 <b>ITTIFOQ GURUHI</b>\n\n"
-                f"📛 Nomi: <b>{group.name}</b>\n"
+                f"📛 Nomi: <b>{_html.escape(str(group.name) or "")}</b>\n"
                 f"👥 A'zolar ({len(group.members)}/{MAX_MEMBERS}):\n{member_lines}"
             )
         else:
@@ -147,7 +148,7 @@ async def group_create_name(message: Message, state: FSMContext):
 
     await state.clear()
     await message.answer(
-        f"✅ <b>«{group.name}»</b> ittifoq guruhi tuzildi!\n\n"
+        f"✅ <b>«{_html.escape(str(group.name) or "")}»</b> ittifoq guruhi tuzildi!\n\n"
         f"📍 Hudud: <b>{house_region}</b>\n"
         f"Faqat shu hududdagi xonadonlarga taklif yuborishingiz mumkin.\n"
         f"Guruhda maksimal {MAX_MEMBERS} ta xonadon bo'la oladi.",
@@ -274,7 +275,7 @@ async def group_invite_send(callback: CallbackQuery, state: FSMContext):
             await callback.bot.send_message(
                 target_lord_id,
                 f"📨 <b>ITTIFOQ TAKLIFI!</b>\n\n"
-                f"<b>{my_house.name}</b> xonadoni sizni\n"
+                f"<b>{_html.escape(str(my_house.name) or "")}</b> xonadoni sizni\n"
                 f"<b>«{group_name}»</b> ittifoq guruhiga taklif qilmoqda.\n\n"
                 f"Guruhda hozir {member_count}/{MAX_MEMBERS} ta xonadon.",
                 reply_markup=alliance_invite_keyboard(invite.id),
@@ -288,7 +289,7 @@ async def group_invite_send(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.answer()
     await callback.message.edit_text(
-        f"✅ <b>{target_house.name}</b> xonadoniga taklif yuborildi.",
+        f"✅ <b>{_html.escape(str(target_house.name) or "")}</b> xonadoniga taklif yuborildi.",
         reply_markup=back_only_keyboard("diplo:group_menu"),
         parse_mode="HTML"
     )
@@ -354,7 +355,7 @@ async def invite_accept(callback: CallbackQuery):
         try:
             await callback.bot.send_message(
                 leader_lord_id,
-                f"✅ <b>{my_house.name}</b> xonadoni\n"
+                f"✅ <b>{_html.escape(str(my_house.name) or "")}</b> xonadoni\n"
                 f"<b>«{group_name}»</b> guruhiga qo'shildi!\n"
                 f"Guruhda hozir {member_count}/{MAX_MEMBERS} ta xonadon.",
                 parse_mode="HTML"
@@ -427,7 +428,7 @@ async def group_info(callback: CallbackQuery):
             return
 
         is_leader = group.leader_house_id == user.house_id
-        lines = [f"🏰 <b>«{group.name}»</b>\n"]
+        lines = [f"🏰 <b>«{_html.escape(str(group.name) or "")}»</b>\n"]
         total_power = 0
         for m in group.members:
             h = m.house
@@ -435,7 +436,7 @@ async def group_info(callback: CallbackQuery):
             total_power += power
             role_icon = "👑" if h.id == group.leader_house_id else "⚔️"
             lines.append(
-                f"{role_icon} <b>{h.name}</b>\n"
+                f"{role_icon} <b>{_html.escape(str(h.name) or "")}</b>\n"
                 f"   ⚡ {power:,}  |  🗡️ {h.total_soldiers:,}  🐉 {h.total_dragons}  🏹 {h.total_scorpions}"
             )
         lines.append(f"\n📊 Umumiy kuch: <b>{total_power:,}</b>")
