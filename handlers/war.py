@@ -1,4 +1,5 @@
 from aiogram import Router, F
+import html as _html
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -859,7 +860,7 @@ async def request_betrayal(message: Message, state: FSMContext):
             try:
                 await message.bot.send_message(
                     old_house.lord_id,
-                    f"🗡️ <b>XIYONAT!</b>\n<b>{user.full_name}</b> jang paytida xonadonni tark etdi!",
+                    f"🗡️ <b>XIYONAT!</b>\n<b>{_html.escape(user.full_name or "")}</b> jang paytida xonadonni tark etdi!",
                     parse_mode="HTML"
                 )
             except Exception:
