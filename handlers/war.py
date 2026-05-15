@@ -183,7 +183,7 @@ async def war_menu(message: Message):
             for aw in active_wars:
                 other = aw.defender if aw.attacker_house_id == user.house_id else aw.attacker
                 role_emoji = "⚔️" if aw.attacker_house_id == user.house_id else "🛡️"
-                text += f"{role_emoji} <b>{other.name}</b> — {aw.status.value}\n"
+                text += f"{role_emoji} <b>{_html.escape(str(other.name) or "")}</b> — {aw.status.value}\n"
                 if aw.grace_ends_at:
                     remaining = aw.grace_ends_at - datetime.utcnow()
                     if remaining.total_seconds() > 0:
@@ -315,7 +315,7 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
             and attacker_group.id == defender_group.id
         ):
             await callback.answer(
-                f"❌ «{attacker_group.name}» ittifoq guruhingiz a'zosiga urush e'lon qilib bo'lmaydi!",
+                f"❌ «{_html.escape(str(attacker_group.name) or "")}» ittifoq guruhingiz a'zosiga urush e'lon qilib bo'lmaydi!",
                 show_alert=True
             )
             await state.clear()
@@ -392,7 +392,7 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
                         await callback.bot.send_message(
                             beneficiary.lord_id,
                             f"⚠️ <b>ITTIFOQCHI YORDAMI BEKOR QILINDI!</b>\n\n"
-                            f"<b>{defender.name}</b> xonadoniga urush e'lon qilindi!\n"
+                            f"<b>{_html.escape(str(defender.name) or "")}</b> xonadoniga urush e'lon qilindi!\n"
                             f"Ular sizga bergan yordamlari avtomatik bekor bo'ldi.",
                             parse_mode="HTML"
                         )
@@ -424,7 +424,7 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
                 await bot.send_message(
                     defender.lord_id,
                     f"⚔️ <b>URUSH E'LONI!</b>\n\n"
-                    f"<b>{attacker.name}</b> sizga urush e'lon qildi!\n"
+                    f"<b>{_html.escape(str(attacker.name) or "")}</b> sizga urush e'lon qildi!\n"
                     f"⏰ Grace Period: {settings.GRACE_PERIOD_MINUTES} daqiqa\n\n"
                     f"Qaror qiling: Taslim bo'lasizmi yoki jangga kirasizmi?",
                     reply_markup=surrender_or_fight_keyboard(war.id),
@@ -479,7 +479,7 @@ async def declare_war_confirm(callback: CallbackQuery, state: FSMContext):
 
     await callback.message.answer(
         f"⚔️ <b>Urush e'lon qilindi!</b>\n\n"
-        f"🎯 Maqsad: {defender.name}\n"
+        f"🎯 Maqsad: {_html.escape(str(defender.name) or "")}\n"
         f"⏰ Grace Period: {settings.GRACE_PERIOD_MINUTES} daqiqa\n"
         f"Muddat: {_war_ends} gacha",
         parse_mode="HTML"
@@ -550,7 +550,7 @@ async def do_surrender(callback: CallbackQuery):
             if loot_qty > 0:
                 row.quantity = max(0, row.quantity - loot_qty)
                 await custom_repo.add_house_item(attacker.id, row.item_id, loot_qty)
-                item_loot_parts.append(f"{row.item.emoji}{row.item.name}×{loot_qty}")
+                item_loot_parts.append(f"{row.item.emoji}{_html.escape(str(row.item.name) or "")}×{loot_qty}")
         await session.commit()
 
         # Agar attacker avval defender vassali bo'lgan bo'lsa — ozod bo'ladi
@@ -622,7 +622,7 @@ async def do_surrender(callback: CallbackQuery):
             try:
                 await callback.bot.send_message(
                     attacker.lord_id,
-                    f"🏳️ <b>{defender.name} taslim bo'ldi!</b>\n"
+                    f"🏳️ <b>{_html.escape(str(defender.name) or "")} taslim bo'ldi!</b>\n"
                     f"💰 O'lja: {loot['gold']} oltin\n"
                     f"🗡️ +{loot['soldiers']} askar\n"
                     f"🐉 +{loot['dragons']} ajdar"
@@ -790,7 +790,7 @@ async def war_status(callback: CallbackQuery):
             enemy = war.defender if is_attacker else war.attacker
             role_text = "Hujumchi ⚔️" if is_attacker else "Mudofaachi 🛡️"
             text += (
-                f"{role_text} — <b>{enemy.name}</b>\n"
+                f"{role_text} — <b>{_html.escape(str(enemy.name) or "")}</b>\n"
                 f"Holat: {war.status.value}\n"
             )
             if war.grace_ends_at:
@@ -867,7 +867,7 @@ async def request_betrayal(message: Message, state: FSMContext):
                 pass
 
         await message.answer(
-            f"🗡️ Siz <b>{enemy_house.name}</b> xonadoniga o'tdingiz.\n"
+            f"🗡️ Siz <b>{_html.escape(str(enemy_house.name) or "")}</b> xonadoniga o'tdingiz.\n"
             f"Xiyonat xronikaga yozildi.",
             parse_mode="HTML"
         )
