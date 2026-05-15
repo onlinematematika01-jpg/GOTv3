@@ -1,4 +1,5 @@
 from aiogram import Router, F
+import html as _html
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -75,7 +76,7 @@ async def send_internal_message(message: Message, state: FSMContext):
         # Barcha xonadon a'zolariga yuborish
         members = await user_repo.get_house_members(user.house_id)
         notification = (
-            f"💬 <b>{user.full_name}:</b> {message.text}"
+            f"💬 <b>{_html.escape(user.full_name or "")}:</b> {_html.escape(message.text or "")}"
         )
         for member in members:
             if member.id != user.id:
