@@ -1,3 +1,4 @@
+import html as _html
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -111,9 +112,9 @@ async def notify_allies(bot, war, house, side: str):
                 await bot.send_message(
                     ally_house.lord_id,
                     f"🏰 <b>ITTIFOQ GURUHI YORDAM SO'RAMOQDA!</b>\n\n"
-                    f"«<b>{group.name}</b>» guruhingiz a'zosi\n"
-                    f"<b>{my_house.name}</b> ({role_text}) "
-                    f"<b>{enemy.name}</b> bilan urushda!\n\n"
+                    f"«<b>{_html.escape(str(group.name) or "")}</b>» guruhingiz a'zosi\n"
+                    f"<b>{_html.escape(str(my_house.name) or "")}</b> ({role_text}) "
+                    f"<b>{_html.escape(str(enemy.name) or "")}</b> bilan urushda!\n\n"
                     f"Guruh sifatida qo'llab-quvvatlaysizmi?",
                     reply_markup=ally_support_keyboard(war_obj.id, side),
                     parse_mode="HTML"
@@ -214,8 +215,8 @@ async def ally_join_full(callback: CallbackQuery):
             try:
                 await callback.bot.send_message(
                     main_house.lord_id,
-                    f"🤝 <b>«{ally_group.name}»</b> guruhidan\n"
-                    f"<b>{house.name}</b> jangga qo'shildi!\n"
+                    f"🤝 <b>«{_html.escape(str(ally_group.name) or "")}»</b> guruhidan\n"
+                    f"<b>{_html.escape(str(house.name) or "")}</b> jangga qo'shildi!\n"
                     f"🗡️ +{house.total_soldiers} askar | 🏹 +{house.total_scorpions} skorpion",
                     parse_mode="HTML"
                 )
@@ -226,8 +227,8 @@ async def ally_join_full(callback: CallbackQuery):
         side_text = "hujumchi" if side == "attacker" else "mudofaachi"
         ally_text = (
             f"🤝 <b>ITTIFOQ GURUH A'ZOSI QO'SHILDI!</b>\n\n"
-            f"<b>{house.name}</b> [{ally_group.name}] → "
-            f"<b>{main_house.name}</b> ({side_text}) tomoniga qo'shildi!\n"
+            f"<b>{_html.escape(str(house.name) or "")}</b> [{_html.escape(str(ally_group.name) or "")}] → "
+            f"<b>{_html.escape(str(main_house.name) or "")}</b> ({side_text}) tomoniga qo'shildi!\n"
             f"🗡️ {house.total_soldiers} askar | 🏹 {house.total_scorpions} skorpion"
         )
         try:
@@ -363,7 +364,7 @@ async def ally_send_soldiers_confirm(message: Message, state: FSMContext):
                 await message.bot.send_message(
                     main_house.lord_id,
                     f"🤝 <b>«{group_name}»</b> guruhidan\n"
-                    f"<b>{house.name}</b> {amount} askar yubordi!",
+                    f"<b>{_html.escape(str(house.name) or "")}</b> {amount} askar yubordi!",
                     parse_mode="HTML"
                 )
             except Exception:
@@ -373,8 +374,8 @@ async def ally_send_soldiers_confirm(message: Message, state: FSMContext):
         side_text = "hujumchi" if side == "attacker" else "mudofaachi"
         ally_text = (
             f"🤝 <b>GURUH A'ZOSI ASKAR YUBORDI!</b>\n\n"
-            f"<b>{house.name}</b> [{group_name}] → "
-            f"<b>{main_house.name}</b> ({side_text}) tomonga\n"
+            f"<b>{_html.escape(str(house.name) or "")}</b> [{group_name}] → "
+            f"<b>{_html.escape(str(main_house.name) or "")}</b> ({side_text}) tomonga\n"
             f"🗡️ {amount} askar yubordi"
         )
         try:
@@ -520,7 +521,7 @@ async def ally_send_gold_confirm(message: Message, state: FSMContext):
                 await message.bot.send_message(
                     main_house.lord_id,
                     f"🤝 <b>«{group_name}»</b> guruhidan\n"
-                    f"<b>{house.name}</b> {amount} oltin yubordi!\n"
+                    f"<b>{_html.escape(str(house.name) or "")}</b> {amount} oltin yubordi!\n"
                     f"💰 Xazinangizga qo'shildi.",
                     parse_mode="HTML"
                 )
@@ -531,8 +532,8 @@ async def ally_send_gold_confirm(message: Message, state: FSMContext):
         side_text = "hujumchi" if side == "attacker" else "mudofaachi"
         ally_text = (
             f"💰 <b>GURUH A'ZOSI OLTIN YUBORDI!</b>\n\n"
-            f"<b>{house.name}</b> [{group_name}] → "
-            f"<b>{main_house.name}</b> ({side_text}) tomonga\n"
+            f"<b>{_html.escape(str(house.name) or "")}</b> [{group_name}] → "
+            f"<b>{_html.escape(str(main_house.name) or "")}</b> ({side_text}) tomonga\n"
             f"💰 {amount} oltin yubordi"
         )
         try:
