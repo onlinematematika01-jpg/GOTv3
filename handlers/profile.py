@@ -1,3 +1,4 @@
+import html as _html
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
@@ -49,11 +50,11 @@ async def show_profile(message: Message):
         house_items = await custom_repo.get_house_items_with_info(user.house_id) if user.house_id else []
         custom_items_text = ""
         if house_items:
-            parts = [f"{r.item.emoji} {r.item.name}: {r.quantity} ta" for r in house_items]
+            parts = [f"{r.item.emoji} {_html.escape(str(r.item.name) or "")}: {r.quantity} ta" for r in house_items]
             custom_items_text = "\n🎒 <b>Maxsus qurollar:</b>\n  " + "\n  ".join(parts) + "\n"
 
         text = (
-            f"👤 <b>{user.full_name}</b>\n"
+            f"👤 <b>{_html.escape(str(user.full_name) or "")}</b>\n"
             f"{'@' + user.username if user.username else ''}\n\n"
             f"👑 <b>Rol:</b> {role_label}\n"
             f"🏰 <b>Xonadon:</b> {house_name}\n"
@@ -95,7 +96,7 @@ async def show_house(message: Message):
         high_lord = await user_repo.get_by_id(house.high_lord_id) if house.high_lord_id else None
 
         members_text = "\n".join(
-            f"  {'👑' if m.role == RoleEnum.LORD else '⚔️'} {m.full_name}"
+            f"  {'👑' if m.role == RoleEnum.LORD else '⚔️'} {_html.escape(str(m.full_name) or "")}"
             for m in members[:10]
         )
 
@@ -103,7 +104,7 @@ async def show_house(message: Message):
         house_items = await custom_repo.get_house_items_with_info(house.id)
         custom_items_text = ""
         if house_items:
-            parts = [f"{r.item.emoji} {r.item.name}: {r.quantity} ta" for r in house_items]
+            parts = [f"{r.item.emoji} {_html.escape(str(r.item.name) or "")}: {r.quantity} ta" for r in house_items]
             custom_items_text = "\n🎯 <b>Maxsus qurollar:</b>\n  " + "\n  ".join(parts) + "\n"
 
         # Xonadon qarzi
@@ -117,7 +118,7 @@ async def show_house(message: Message):
             occ_text = f"\n⛓️ <b>Bosib olingan!</b> Soliq: {house.permanent_tax_rate*100:.0f}%"
 
         text = (
-            f"🏰 <b>{house.name}</b>\n"
+            f"🏰 <b>{_html.escape(str(house.name) or "")}</b>\n"
             f"🗺️ Hudud: {house.region.value}\n\n"
             f"👑 Lord: {lord.full_name if lord else '—'}\n"
             f"🦅 Hukmdor: {high_lord.full_name if high_lord else '—'}\n\n"
