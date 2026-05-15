@@ -1,4 +1,5 @@
 from aiogram import Router, F
+import html as _html
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
@@ -732,18 +733,18 @@ async def _show_reset_confirm(callback: CallbackQuery, state: FSMContext):
             pal = await pre_repo.get_by_house(h.id)
             if pal and not pal.is_applied:
                 label = f"@{pal.username}" if pal.username else (pal.full_name or str(pal.user_id))
-                lord_lines.append(f"  🏰 {h.name} → 👑 {label}")
+                lord_lines.append(f"  🏰 {_html.escape(h.name)} → 👑 {_html.escape(str(label))}")
             else:
-                lord_lines.append(f"  🏰 {h.name} → —")
+                lord_lines.append(f"  🏰 {_html.escape(h.name)} → —")
 
             gsr = await gsr_repo.get_by_house(h.id)
             if gsr and not gsr.is_applied:
                 res_lines.append(
-                    f"  🏰 {h.name} → 💰{gsr.treasury:,} ⚔️{gsr.total_soldiers} "
+                    f"  🏰 {_html.escape(h.name)} → 💰{gsr.treasury:,} ⚔️{gsr.total_soldiers} "
                     f"🐉{gsr.total_dragons} 🏹{gsr.total_scorpions}"
                 )
             else:
-                res_lines.append(f"  🏰 {h.name} → belgilanmagan")
+                res_lines.append(f"  🏰 {_html.escape(h.name)} → belgilanmagan")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -772,7 +773,7 @@ async def _show_reset_confirm(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await callback.message.answer(
         f"📋 <b>SEZON #{current_season} YAKUNLASH — TASDIQLASH</b>\n\n"
-        f"🏆 G'olib: <b>{winner_name}</b>\n"
+        f"🏆 G'olib: <b>{_html.escape(str(winner_name))}</b>\n"
         f"⚔️ Urushlar: {total_wars}  |  👥 A'zolar: {total_users}\n\n"
         f"👑 <b>Tayinlangan Lordlar:</b>\n{lords_text}\n\n"
         f"🎒 <b>Boshlang'ich Resurslar:</b>\n{res_text}\n\n"
