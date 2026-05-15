@@ -9,6 +9,7 @@ Hukmdorlik Da'vosi Mexanikasi
 6. Barcha urushlar tugagach — da'vogar HIGH_LORD bo'ladi
 """
 from aiogram import Router, F
+import html as _html
 from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton,
