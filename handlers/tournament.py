@@ -12,6 +12,7 @@ import logging
 from datetime import datetime
 
 from aiogram import Router, F
+import html as _html
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -600,7 +601,7 @@ async def _finish_tournament(session, tournament: Tournament, bot):
                 .values(treasury=House.treasury + prize)
             )
         result_lines.append(
-            f"{medal} {i+1}-o'rin: <b>{knight.full_name}</b> — {pts} ball"
+            f"{medal} {i+1}-o'rin: <b>{_html.escape(knight.full_name or "")}</b> — {pts} ball"
             + (f" | +{prize:,} tanga" if prize > 0 else "")
         )
         # Ritsarga shaxsiy xabar
@@ -659,7 +660,7 @@ async def tourn_status(call: CallbackQuery):
                 )
             )
             pts = ans_result.scalar_one() or 0
-            lines.append(f"⚔️ {k.full_name}: {pts} ball")
+            lines.append(f"⚔️ {_html.escape(k.full_name or "")}: {pts} ball")
 
     await call.message.answer("\n".join(lines) or "Hali natija yo'q.", parse_mode="HTML")
     await call.answer()
@@ -695,7 +696,7 @@ async def lord_select_knight(message: Message, state: FSMContext):
         current_knight_id = house.knight_id
         kb_buttons = []
         for m in members:
-            label = f"⚔️ {m.full_name}"
+            label = f"⚔️ {_html.escape(m.full_name or "")}"
             if m.id == current_knight_id:
                 label += " (joriy ritsar)"
             kb_buttons.append([InlineKeyboardButton(
@@ -772,7 +773,7 @@ async def lord_knight_chosen(call: CallbackQuery, state: FSMContext):
         house_name = house.name if house else "Xonadon"
 
     await call.message.edit_text(
-        f"✅ <b>{member.full_name}</b> endi <b>{house_name}</b> xonadonining ritsari!",
+        f"✅ <b>{_html.escape(member.full_name or "")}</b> endi <b>{house_name}</b> xonadonining ritsari!",
         parse_mode="HTML"
     )
 
