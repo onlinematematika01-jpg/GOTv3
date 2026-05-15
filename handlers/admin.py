@@ -10,7 +10,7 @@ from database.repositories import UserRepo, HouseRepo, MarketRepo, BotSettingsRe
 from database.models import RoleEnum, RegionEnum, House
 from keyboards import admin_keyboard, back_only_keyboard, house_list_keyboard
 from config.settings import settings
-from sqlalchemy import select, update, delete, text
+from sqlalchemy import select, update, delete, text, func
 from sqlalchemy.orm import selectinload
 from database.models import User, MarketPrice, IronBankLoan, Alliance, War, Chronicle, InternalMessage, WarAllySupport, HukmdorClaim, HukmdorClaimResponse, UserCustomItem, HouseCustomItem, GameSeason, PreAssignedLord, GameStartResources, HouseResources, GameStartCustomItem
 
@@ -624,11 +624,12 @@ async def admin_reset_winner_auto(callback: CallbackQuery, state: FSMContext):
     # Eng ko'p urush yutgan xonadonni topamiz
     async with AsyncSessionFactory() as session:
         result = await session.execute(
-            select(House).outerjoin(
+            select(House, func.count(War.id).label("win_count")).outerjoin(
                 War, War.winner_house_id == House.id
             ).group_by(House.id).order_by(func.count(War.id).desc())
         )
-        top_house = result.scalars().first()
+        row = result.first()
+        top_house = row[0] if row else None
 
     winner_id = top_house.id if top_house else None
     winner_name = top_house.name if top_house else "Noma'lum"
