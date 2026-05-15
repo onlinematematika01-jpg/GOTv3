@@ -16,6 +16,7 @@ Ritsar vakolatlari:
  - Urush buyrug'ini tasdiqlash yoki rad etish
 """
 
+import html as _html
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -47,7 +48,7 @@ def knight_select_keyboard(members, prefix="knight:appoint"):
     builder = InlineKeyboardBuilder()
     for m in members:
         builder.button(
-            text=f"{m.full_name}",
+            text=f"{_html.escape(str(m.full_name) or "")}",
             callback_data=f"{prefix}:{m.id}"
         )
     builder.adjust(1)
@@ -198,7 +199,7 @@ async def knight_appoint_confirm(callback: CallbackQuery):
 
         await callback.answer()
         await callback.message.edit_text(
-            f"⚔️ <b>{target.full_name}</b> endi <b>Ritsar</b>!\n\n"
+            f"⚔️ <b>{_html.escape(str(target.full_name) or "")}</b> endi <b>Ritsar</b>!\n\n"
             f"U bozordan askar sotib ola oladi va urushda sizga yordam beradi.",
             parse_mode="HTML"
         )
@@ -209,7 +210,7 @@ async def knight_appoint_confirm(callback: CallbackQuery):
             await callback.bot.send_message(
                 target_id,
                 f"⚔️ <b>SIZ RITSAR BO'LDINGIZ!</b>\n\n"
-                f"<b>{lord.full_name}</b> sizni <b>{house.name}</b> xonadonining "
+                f"<b>{_html.escape(str(lord.full_name) or "")}</b> sizni <b>{house.name}</b> xonadonining "
                 f"Ritsari etib tayinladi!\n\n"
                 f"Imkoniyatlaringiz:\n"
                 f"• Bozordan askar sotib olish (limit: {settings.KNIGHT_SOLDIER_BUY_LIMIT} ta)\n"
@@ -293,7 +294,7 @@ async def knight_manage_detail(callback: CallbackQuery):
                 house_repo = HR(session)
                 enemy = w.defender if w.attacker_house_id == lord.house_id else w.attacker
                 builder.button(
-                    text=f"📨 Buyruq yuborish → {enemy.name}",
+                    text=f"📨 Buyruq yuborish → {_html.escape(str(enemy.name) or "")}",
                     callback_data=f"knight:send_order:{knight_user_id}:{w.id}"
                 )
         builder.button(
@@ -308,7 +309,7 @@ async def knight_manage_detail(callback: CallbackQuery):
 
         await callback.answer()
         await callback.message.edit_text(
-            f"⚔️ <b>{knight_user.full_name}</b>\n"
+            f"⚔️ <b>{_html.escape(str(knight_user.full_name) or "")}</b>\n"
             f"Askarlari: <b>{profile.soldiers}</b>\n\n"
             f"Amal tanlang:",
             reply_markup=builder.as_markup(),
@@ -357,7 +358,7 @@ async def knight_exile_confiscate(callback: CallbackQuery):
 
         await callback.answer()
         await callback.message.edit_text(
-            f"✅ <b>{knight_user.full_name}</b> badarg'a qilindi!\n"
+            f"✅ <b>{_html.escape(str(knight_user.full_name) or "")}</b> badarg'a qilindi!\n"
             f"💀 Musodara qilingan askarlar: <b>{confiscated}</b>\n"
             f"Ular xonadon hisobiga o'tdi.",
             parse_mode="HTML"
@@ -367,7 +368,7 @@ async def knight_exile_confiscate(callback: CallbackQuery):
             await callback.bot.send_message(
                 knight_user_id,
                 f"❌ <b>BADARG'A!</b>\n\n"
-                f"Lord <b>{lord.full_name}</b> sizni xonadondan badarg'a qildi!\n"
+                f"Lord <b>{_html.escape(str(lord.full_name) or "")}</b> sizni xonadondan badarg'a qildi!\n"
                 f"Barcha askarlaringiz ({confiscated} ta) musodara qilindi.\n"
                 f"Siz endi oddiy a'zo emassiz.",
                 parse_mode="HTML"
@@ -404,7 +405,7 @@ async def knight_exile_only(callback: CallbackQuery):
 
         await callback.answer()
         await callback.message.edit_text(
-            f"✅ <b>{knight_user.full_name}</b> badarg'a qilindi (askarlar saqlanmadi).",
+            f"✅ <b>{_html.escape(str(knight_user.full_name) or "")}</b> badarg'a qilindi (askarlar saqlanmadi).",
             parse_mode="HTML"
         )
 
@@ -412,7 +413,7 @@ async def knight_exile_only(callback: CallbackQuery):
             await callback.bot.send_message(
                 knight_user_id,
                 f"❌ <b>BADARG'A!</b>\n\n"
-                f"Lord <b>{lord.full_name}</b> sizni xonadondan chiqarib yubordi.",
+                f"Lord <b>{_html.escape(str(lord.full_name) or "")}</b> sizni xonadondan chiqarib yubordi.",
                 parse_mode="HTML"
             )
         except Exception as e:
@@ -460,7 +461,7 @@ async def knight_send_order_start(callback: CallbackQuery, state: FSMContext):
 
         await callback.answer()
         await callback.message.answer(
-            f"📨 <b>{knight_user.full_name}</b> ga buyruq\n\n"
+            f"📨 <b>{_html.escape(str(knight_user.full_name) or "")}</b> ga buyruq\n\n"
             f"Nechta askar bilan borishini belgilang?\n"
             f"Ritsarning mavjud askarlari: <b>{profile.soldiers}</b>\n"
             f"(0 kiritsangiz — barcha askarlari bilan boradi)",
@@ -512,7 +513,7 @@ async def knight_send_order_soldiers(message: Message, state: FSMContext):
             await message.bot.send_message(
                 data["knight_user_id"],
                 f"📨 <b>URUSH BUYRUG'I!</b>\n\n"
-                f"Lord <b>{lord.full_name}</b> sizni urushga chaqirmoqda!\n"
+                f"Lord <b>{_html.escape(str(lord.full_name) or "")}</b> sizni urushga chaqirmoqda!\n"
                 f"Bilan borishingiz kerak: <b>{soldiers}</b> askar\n\n"
                 f"Qabul qilasizmi?",
                 reply_markup=knight_order_keyboard(order.id),
@@ -588,7 +589,7 @@ async def knight_order_accept(callback: CallbackQuery):
         try:
             await callback.bot.send_message(
                 order.lord_id,
-                f"✅ <b>{user.full_name}</b> buyruqni qabul qildi!\n"
+                f"✅ <b>{_html.escape(str(user.full_name) or "")}</b> buyruqni qabul qildi!\n"
                 f"{order.soldiers} askar jangga qo'shildi.",
                 parse_mode="HTML"
             )
@@ -629,7 +630,7 @@ async def knight_order_reject(callback: CallbackQuery):
         try:
             await callback.bot.send_message(
                 order.lord_id,
-                f"❌ <b>{user.full_name}</b> buyruqni RAD ETDI!\n\n"
+                f"❌ <b>{_html.escape(str(user.full_name) or "")}</b> buyruqni RAD ETDI!\n\n"
                 f"Jazo chorasi ko'ring:\n"
                 f"• Askarlarini musodara qilib badarg'a\n"
                 f"• Faqat badarg'a",
@@ -726,7 +727,7 @@ async def knight_profile(message: Message):
 
         text = (
             f"⚔️ <b>RITSAR PROFILI</b>\n\n"
-            f"👤 {user.full_name}\n"
+            f"👤 {_html.escape(str(user.full_name) or "")}\n"
             f"🗡️ Askarlar: <b>{profile.soldiers}</b>/{settings.KNIGHT_MAX_SOLDIERS}\n"
             f"🌾 Kunlik farm: {farm_status} (+{settings.KNIGHT_DAILY_FARM})\n\n"
         )
@@ -734,7 +735,7 @@ async def knight_profile(message: Message):
         if pending_orders:
             text += f"📨 <b>Kutilayotgan buyruqlar: {len(pending_orders)}</b>\n"
             for o in pending_orders:
-                text += f"  • {o.soldiers} askar bilan — {o.house.name} urushi\n"
+                text += f"  • {o.soldiers} askar bilan — {_html.escape(str(o.house.name) or "")} urushi\n"
 
         await message.answer(text, parse_mode="HTML")
 
@@ -742,7 +743,7 @@ async def knight_profile(message: Message):
         for o in pending_orders:
             await message.answer(
                 f"📨 <b>Buyruq #{o.id}</b>\n"
-                f"Urush: {o.house.name}\n"
+                f"Urush: {_html.escape(str(o.house.name) or "")}\n"
                 f"Askarlar: <b>{o.soldiers}</b>\n\n"
                 f"Qabul qilasizmi?",
                 reply_markup=knight_order_keyboard(o.id),
