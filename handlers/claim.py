@@ -145,7 +145,7 @@ async def start_claim(message: Message):
                     await message.bot.send_message(
                         house.lord_id,
                         f"👑 <b>HUKMDORLIK DA'VOSI!</b>\n\n"
-                        f"<b>{my_house.name}</b> xonadoni "
+                        f"<b>{_html.escape(str(my_house.name) or "")}</b> xonadoni "
                         f"<b>{user.region.value}</b> hududining Hukmdori bo'lish "
                         f"da'vosini ochdi!\n\n"
                         f"Qaror qiling:\n"
@@ -163,7 +163,7 @@ async def start_claim(message: Message):
         chronicle_repo = ChronicleRepo(session)
         text = (
             f"👑 <b>HUKMDORLIK DA'VOSI!</b>\n\n"
-            f"<b>{my_house.name}</b> xonadoni <b>{user.region.value}</b> "
+            f"<b>{_html.escape(str(my_house.name) or "")}</b> xonadoni <b>{user.region.value}</b> "
             f"hududining Hukmdori bo'lish da'vosini ochdi!\n"
             f"Javob kutilayotgan xonadonlar: {len(other_houses)} ta"
         )
@@ -218,7 +218,7 @@ async def claim_accept(callback: CallbackQuery):
         await callback.answer("✅ Qabul qildingiz — vassal bo'ldingiz!")
         await callback.message.edit_text(
             f"✅ <b>Qabul qildingiz!</b>\n\n"
-            f"<b>{claimant.name}</b> xonadonini Hukmdor sifatida tan oldingiz.\n"
+            f"<b>{_html.escape(str(claimant.name) or "")}</b> xonadonini Hukmdor sifatida tan oldingiz.\n"
             f"Siz vassal bo'ldingiz va o'lpon to'laysiz.",
             parse_mode="HTML"
         )
@@ -287,7 +287,7 @@ async def claim_reject(callback: CallbackQuery):
         await callback.answer("⚔️ Rad etdingiz — URUSH boshlanmoqda!")
         await callback.message.edit_text(
             f"⚔️ <b>Rad etdingiz!</b>\n\n"
-            f"<b>{claimant.name}</b> bilan ichki urush boshlanmoqda!\n"
+            f"<b>{_html.escape(str(claimant.name) or "")}</b> bilan ichki urush boshlanmoqda!\n"
             f"⏰ Grace Period: {settings.GRACE_PERIOD_MINUTES} daqiqa\n"
             f"Bu Hukmdorlik uchun jang — g'olib Hukmdor bo'ladi!",
             parse_mode="HTML"
@@ -298,7 +298,7 @@ async def claim_reject(callback: CallbackQuery):
             try:
                 await callback.bot.send_message(
                     claimant.lord_id,
-                    f"⚔️ <b>{defender.name}</b> da'vozingizni rad etdi!\n"
+                    f"⚔️ <b>{_html.escape(str(defender.name) or "")}</b> da'vozingizni rad etdi!\n"
                     f"Hudud: <b>{claim.region.value}</b>\n"
                     f"Grace Period: {settings.GRACE_PERIOD_MINUTES} daqiqa",
                     parse_mode="HTML"
@@ -340,7 +340,7 @@ async def _check_claim_completion(claim_id: int, bot, session):
         from utils.chronicle import post_to_chronicle
         text = (
             f"👑 <b>YANGI HUKMDOR!</b>\n\n"
-            f"<b>{claimant.name}</b> barcha xonadonlar tomonidan "
+            f"<b>{_html.escape(str(claimant.name) or "")}</b> barcha xonadonlar tomonidan "
             f"<b>{claim.region.value}</b> hududining Hukmdori sifatida tan olindi!\n"
             f"Tinch yo'l bilan hokimiyat o'tdi. 🕊️"
         )
@@ -423,7 +423,7 @@ async def check_claim_wars_ended(bot, session):
             from utils.chronicle import post_to_chronicle
             text = (
                 f"👑 <b>YANGI HUKMDOR — URUSH ORQALI!</b>\n\n"
-                f"<b>{winner.name}</b> barcha raqiblarini mag'lub etib "
+                f"<b>{_html.escape(str(winner.name) or "")}</b> barcha raqiblarini mag'lub etib "
                 f"<b>{claim.region.value}</b> hududining Hukmdori bo'ldi!\n"
                 f"⚔️ Qilich bilan hokimiyat qo'lga kiritildi."
             )
@@ -514,7 +514,7 @@ async def request_vassal_troops(callback: CallbackQuery):
             try:
                 await callback.bot.send_message(
                     vassal.lord_id,
-                    f"👑 <b>{my_house.name}</b> (Hukmdor) sizdan askar so'ramoqda!\n\n"
+                    f"👑 <b>{_html.escape(str(my_house.name) or "")}</b> (Hukmdor) sizdan askar so'ramoqda!\n\n"
                     f"Nechta askar yuborasiz?",
                     reply_markup=kb,
                     parse_mode="HTML"
@@ -625,7 +625,7 @@ async def vassal_troops_send(message: Message, state: FSMContext):
 
         await state.clear()
         await message.answer(
-            f"✅ <b>{amount}</b> askar <b>{hukmdor_house.name}</b> ga yuborildi.",
+            f"✅ <b>{amount}</b> askar <b>{_html.escape(str(hukmdor_house.name) or "")}</b> ga yuborildi.",
             parse_mode="HTML"
         )
 
@@ -634,7 +634,7 @@ async def vassal_troops_send(message: Message, state: FSMContext):
             try:
                 await message.bot.send_message(
                     hukmdor_house.lord_id,
-                    f"⚔️ <b>{my_house.name}</b> vassalingiz <b>{amount}</b> askar yubordi!",
+                    f"⚔️ <b>{_html.escape(str(my_house.name) or "")}</b> vassalingiz <b>{amount}</b> askar yubordi!",
                     parse_mode="HTML"
                 )
             except Exception:
