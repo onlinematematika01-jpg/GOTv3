@@ -124,7 +124,7 @@ async def _send_next_question(bot, knight_id: int, tournament: Tournament, sessi
     total = len(tournament.questions)
     num   = len(answered_ids) + 1
     text  = (
-        f"⚔️ <b>TURNIR: {tournament.title}</b>\n\n"
+        f"⚔️ <b>TURNIR: {_html.escape(str(tournament.title) or "")}</b>\n\n"
         f"📌 Savol {num}/{total}:\n\n"
         f"<b>{next_q.text}</b>\n\n"
         f"🏅 Ball: <b>{next_q.points}</b>"
@@ -588,7 +588,7 @@ async def _finish_tournament(session, tournament: Tournament, bot):
     scores.sort(key=lambda x: x[1], reverse=True)
 
     prizes = [tournament.prize_1, tournament.prize_2, tournament.prize_3]
-    result_lines = [f"🏆 <b>TURNIR YAKUNLANDI: {tournament.title}</b>\n"]
+    result_lines = [f"🏆 <b>TURNIR YAKUNLANDI: {_html.escape(str(tournament.title) or "")}</b>\n"]
 
     medals = ["🥇", "🥈", "🥉"]
     for i, (knight, pts) in enumerate(scores[:3]):
@@ -650,7 +650,7 @@ async def tourn_status(call: CallbackQuery):
             select(User).where(User.role == RoleEnum.KNIGHT, User.is_active == True)
         )
         knights = knights_result.scalars().all()
-        lines = [f"⚔️ <b>{t.title}</b> | Holat: {t.status.value}\n"]
+        lines = [f"⚔️ <b>{_html.escape(str(t.title) or "")}</b> | Holat: {t.status.value}\n"]
         for k in knights:
             ans_result = await session.execute(
                 select(func.count(TournamentAnswer.id)).where(
@@ -706,7 +706,7 @@ async def lord_select_knight(message: Message, state: FSMContext):
         kb = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
 
         await message.answer(
-            f"⚔️ <b>{house.name}</b> xonadoni uchun ritsar tanlang:\n"
+            f"⚔️ <b>{_html.escape(str(house.name) or "")}</b> xonadoni uchun ritsar tanlang:\n"
             f"(Ritsar faqat turnirda xonadon uchun tanga ishlaydi)",
             reply_markup=kb, parse_mode="HTML"
         )
