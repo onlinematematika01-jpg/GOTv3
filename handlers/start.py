@@ -1,4 +1,5 @@
 from aiogram import Router, F
+import html as _html
 from aiogram.types import Message
 from aiogram.filters import CommandStart, Command
 from database.engine import AsyncSessionFactory
@@ -27,7 +28,7 @@ async def cmd_start(message: Message):
         if user:
             treasury = user.house.treasury if user.house else 0
             await message.answer(
-                f"🐺 <b>Xush kelibsiz, {user.full_name}!</b>\n\n"
+                f"🐺 <b>Xush kelibsiz, {_html.escape(user.full_name or "")}!</b>\n\n"
                 f"🏰 Xonadon: {user.house.name if user.house else 'Yo\'q'}\n"
                 f"👑 Rol: {user.role.value}\n"
                 f"💰 Xonadon xazinasi: {treasury:,} tanga",
@@ -154,7 +155,7 @@ async def cmd_start(message: Message):
 
         role_text = "Vassal Lordi 👑" if role == RoleEnum.LORD else "A\'zo ⚔️"
         await message.answer(
-            f"🐺 <b>Yetti Qirollikka xush kelibsiz, {user_tg.full_name}!</b>\n\n"
+            f"🐺 <b>Yetti Qirollikka xush kelibsiz, {_html.escape(user_tg.full_name or "")}!</b>\n\n"
             f"🏰 <b>Xonadon:</b> {house.name}\n"
             f"🗺️ <b>Hudud:</b> {house.region.value}\n"
             f"👑 <b>Sizning rolingiz:</b> {role_text}"
@@ -166,7 +167,7 @@ async def cmd_start(message: Message):
         )
 
         logger.info(
-            f"Yangi foydalanuvchi: {user_tg.full_name} → {house.name} "
+            f"Yangi foydalanuvchi: {_html.escape(user_tg.full_name or "")} → {_html.escape(house.name or "")} "
             f"({'taklif' if invite_house_id else 'auto'})"
         )
 
