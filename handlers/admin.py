@@ -13,7 +13,7 @@ from keyboards import admin_keyboard, back_only_keyboard, house_list_keyboard
 from config.settings import settings
 from sqlalchemy import select, update, delete, text, func
 from sqlalchemy.orm import selectinload
-from database.models import User, MarketPrice, IronBankLoan, Alliance, War, Chronicle, InternalMessage, WarAllySupport, HukmdorClaim, HukmdorClaimResponse, UserCustomItem, HouseCustomItem, GameSeason, PreAssignedLord, GameStartResources, HouseResources, GameStartCustomItem
+from database.models import User, MarketPrice, IronBankLoan, Alliance, War, Chronicle, InternalMessage, WarAllySupport, HukmdorClaim, HukmdorClaimResponse, UserCustomItem, HouseCustomItem, GameSeason, PreAssignedLord, GameStartResources, HouseResources, GameStartCustomItem, DailyPurchase, Tournament, TournamentQuestion, TournamentAnswer, KnightProfile, KnightOrder, WarDeployment, Prisoner, IronBankDeposit, AllianceGroup, AllianceGroupMember, AllianceGroupInvite, TerritoryGarrison
 
 router = Router()
 
@@ -863,6 +863,19 @@ async def admin_reset_db_execute(callback: CallbackQuery, state: FSMContext):
             await session.flush()
 
             # ── 3. Bog'liq jadvallarni tozalash (child → parent) ──────────
+            await session.execute(delete(DailyPurchase))
+            await session.execute(delete(TournamentAnswer))
+            await session.execute(delete(TournamentQuestion))
+            await session.execute(delete(Tournament))
+            await session.execute(delete(KnightOrder))
+            await session.execute(delete(KnightProfile))
+            await session.execute(delete(Prisoner))
+            await session.execute(delete(WarDeployment))
+            await session.execute(delete(IronBankDeposit))
+            await session.execute(delete(AllianceGroupInvite))
+            await session.execute(delete(AllianceGroupMember))
+            await session.execute(delete(AllianceGroup))
+            await session.execute(delete(TerritoryGarrison))
             await session.execute(delete(UserCustomItem))
             await session.execute(delete(HouseCustomItem))
             await session.execute(delete(IronBankLoan))
