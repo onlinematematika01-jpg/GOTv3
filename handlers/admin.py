@@ -494,7 +494,7 @@ async def admin_houses(callback: CallbackQuery):
                 lord = await user_repo.get_by_id(h.lord_id)
                 lord_name = lord.full_name if lord else "—"
             text += (
-                f"🏰 <b>{h.name}</b> ({h.region.value})\n"
+                f"🏰 <b>{_html.escape(str(h.name) or "")}</b> ({h.region.value})\n"
                 f"   👑 Lord: {lord_name} | 👥 {count}/10 | 💰 {h.treasury:,}\n"
             )
 
@@ -669,7 +669,7 @@ async def admin_reset_winner_manual(callback: CallbackQuery, state: FSMContext):
     builder = InlineKeyboardBuilder()
     for h in houses:
         builder.button(
-            text=f"🏰 {h.name}",
+            text=f"🏰 {_html.escape(str(h.name) or "")}",
             callback_data=f"admin:reset_pick_house:{h.id}"
         )
     builder.adjust(2)
@@ -1151,7 +1151,7 @@ async def admin_gsr_house_list(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     for h in houses:
-        builder.button(text=f"🏰 {h.name}", callback_data=f"admin:gsr:house:{h.id}")
+        builder.button(text=f"🏰 {_html.escape(str(h.name) or "")}", callback_data=f"admin:gsr:house:{h.id}")
     builder.button(text="🔙 Orqaga", callback_data="admin:game_start_resources")
     builder.adjust(2)
 
@@ -1193,7 +1193,7 @@ async def admin_gsr_house_detail(callback: CallbackQuery):
     scorpion_limit = gsr.scorpion_buy_limit  if gsr and gsr.scorpion_buy_limit  else "(global)"
 
     text = (
-        f"🏰 <b>{house.name}</b> ({house.region.value}) — Boshlang'ich Resurslar\n\n"
+        f"🏰 <b>{_html.escape(str(house.name) or "")}</b> ({house.region.value}) — Boshlang'ich Resurslar\n\n"
         f"💰 Xazina:   <b>{treasury:,}</b>\n"
         f"⚔️ Askar:    <b>{soldiers:,}</b>\n"
         f"🐉 Ajdar:    <b>{dragons:,}</b>\n"
@@ -1344,10 +1344,10 @@ async def admin_gsr_custom_items_list(callback: CallbackQuery):
     # Tayinlangan itemlar xaritasi {item_id: qty}
     assigned_map = {gci.item_id: gci.quantity for gci, _ in assigned}
 
-    lines = [f"🎒 <b>{house.name}</b> — Boshlang'ich Custom Itemlar\n"]
+    lines = [f"🎒 <b>{_html.escape(str(house.name) or "")}</b> — Boshlang'ich Custom Itemlar\n"]
     if assigned:
         for gci, ci in assigned:
-            lines.append(f"  {ci.emoji} {ci.name}: <b>{gci.quantity}</b> dona")
+            lines.append(f"  {ci.emoji} {_html.escape(str(ci.name) or "")}: <b>{gci.quantity}</b> dona")
     else:
         lines.append("  <i>Hech qanday item tayinlanmagan</i>")
 
@@ -1357,7 +1357,7 @@ async def admin_gsr_custom_items_list(callback: CallbackQuery):
     # Mavjud itemlar uchun tahrirlash tugmalari
     for ci in all_items:
         qty = assigned_map.get(ci.id, 0)
-        label = f"{ci.emoji} {ci.name} ({qty})"
+        label = f"{ci.emoji} {_html.escape(str(ci.name) or "")} ({qty})"
         builder.button(
             text=label,
             callback_data=f"admin:gsr:ci:edit:{house_id}:{ci.id}"
@@ -1392,7 +1392,7 @@ async def admin_gsr_custom_item_edit(callback: CallbackQuery, state: FSMContext)
         existing = next((x for x in all_assigned if x.item_id == item_id), None)
         current_qty = existing.quantity if existing else 0
 
-    item_name = f"{ci.emoji} {ci.name}" if ci else f"Item #{item_id}"
+    item_name = f"{ci.emoji} {_html.escape(str(ci.name) or "")}" if ci else f"Item #{item_id}"
     await state.update_data(gsr_ci_house_id=house_id, gsr_ci_item_id=item_id)
     await state.set_state(AdminState.gsr_custom_qty)
 
@@ -1446,7 +1446,7 @@ async def admin_gsr_custom_qty_input(message: Message, state: FSMContext):
             from database.models import CustomItem
             async with AsyncSessionFactory() as s2:
                 ci = (await s2.execute(select(CustomItem).where(CustomItem.id == item_id))).scalar_one_or_none()
-            name = f"{ci.emoji} {ci.name}" if ci else f"Item #{item_id}"
+            name = f"{ci.emoji} {_html.escape(str(ci.name) or "")}" if ci else f"Item #{item_id}"
             await message.answer(
                 f"✅ <b>{name}</b>: <b>{qty}</b> dona saqlandi.",
                 parse_mode="HTML"
@@ -1529,7 +1529,7 @@ async def admin_pre_house_prices(callback: CallbackQuery):
                 holat = "Bo'sh"
             lines.append(f"🏰 {h.name:<15} {price:>8,}   {holat}")
             builder.button(
-                text=f"💰 {h.name} narxini belgilash",
+                text=f"💰 {_html.escape(str(h.name) or "")} narxini belgilash",
                 callback_data=f"admin:pre_house_price:{h.id}"
             )
         builder.button(text="👑 Lord Tayinlash", callback_data="admin:pre_assign_lord")
@@ -1566,7 +1566,7 @@ async def admin_pre_house_price_select(callback: CallbackQuery, state: FSMContex
     await state.set_state(AdminState.waiting_pre_house_price_value)
     await callback.answer()
     await callback.message.answer(
-        f"🏰 <b>{house.name}</b> xonadoni uchun narx belgilang.\n"
+        f"🏰 <b>{_html.escape(str(house.name) or "")}</b> xonadoni uchun narx belgilang.\n"
         f"Joriy narx: <b>{current_price:,}</b> tanga\n\n"
         f"Yangi narxni kiriting (faqat raqam):",
         parse_mode="HTML"
@@ -1693,9 +1693,9 @@ async def admin_pre_assign_lord_menu(callback: CallbackQuery, state: FSMContext)
                 status = f"👑 {label}{src}"
             else:
                 status = "Bo'sh"
-            lines.append(f"🏰 {h.name} — {status}")
+            lines.append(f"🏰 {_html.escape(str(h.name) or "")} — {status}")
             builder.button(
-                text=f"🏰 {h.name}",
+                text=f"🏰 {_html.escape(str(h.name) or "")}",
                 callback_data=f"admin:pre_assign_select:{h.id}"
             )
 
@@ -1738,7 +1738,7 @@ async def admin_pre_assign_select_house(callback: CallbackQuery, state: FSMConte
     await state.set_state(AdminState.waiting_pre_assign_user)
     await callback.answer()
     await callback.message.answer(
-        f"🏰 <b>{house.name}</b> xonadoniga lord tayinlash.{pal_info}\n\n"
+        f"🏰 <b>{_html.escape(str(house.name) or "")}</b> xonadoniga lord tayinlash.{pal_info}\n\n"
         f"Foydalanuvchi Telegram ID raqamini kiriting:\n"
         f"(Mavjud tayinlashni bekor qilish uchun: <code>0</code>)",
         parse_mode="HTML"
@@ -2143,7 +2143,7 @@ async def admin_debt_detail(callback: CallbackQuery):
 
     await callback.answer()
     await callback.message.answer(
-        f"🏰 <b>{house.name}</b>\n\n"
+        f"🏰 <b>{_html.escape(str(house.name) or "")}</b>\n\n"
         f"💰 Xazina: {house.treasury:,} tanga\n"
         f"🗡️ Askarlar: {house.total_soldiers:,}\n"
         f"🐉 Ajdarlar: {house.total_dragons}\n"
@@ -2229,7 +2229,7 @@ async def admin_debt_confiscate_start(callback: CallbackQuery, state: FSMContext
     await state.update_data(debt_house_id=house_id)
     await callback.answer()
     await callback.message.answer(
-        f"⚔️ <b>Resurs musodara — {house.name}</b>\n\n"
+        f"⚔️ <b>Resurs musodara — {_html.escape(str(house.name) or "")}</b>\n\n"
         f"Joriy resurslar:\n"
         f"🗡️ Askarlar: {house.total_soldiers:,}\n"
         f"🐉 Ajdarlar: {house.total_dragons}\n"
@@ -2329,7 +2329,7 @@ async def admin_debt_forgive(callback: CallbackQuery):
 
     await callback.answer()
     await callback.message.answer(
-        f"✅ <b>{house.name}</b> xonadonining qarzi kechirildi.",
+        f"✅ <b>{_html.escape(str(house.name) or "")}</b> xonadonining qarzi kechirildi.",
         parse_mode="HTML"
     )
 
@@ -2388,7 +2388,7 @@ async def admin_transfer_get_user(message: Message, state: FSMContext):
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         buttons = [
             [InlineKeyboardButton(
-                text=f"🏰 {h.name} ({h.region.value})",
+                text=f"🏰 {_html.escape(str(h.name) or "")} ({h.region.value})",
                 callback_data=f"transfer_to:{h.id}"
             )]
             for h in other_houses
@@ -2396,7 +2396,7 @@ async def admin_transfer_get_user(message: Message, state: FSMContext):
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
         await message.answer(
-            f"👤 <b>{user.full_name}</b>\n"
+            f"👤 <b>{_html.escape(str(user.full_name) or "")}</b>\n"
             f"Hozirgi xonadon: <b>{current_house.name if current_house else '—'}</b>\n"
             f"Roli: <b>{user.role.value}</b>\n\n"
             f"Qaysi xonadonga ko'chirish kerak?",
@@ -2468,7 +2468,7 @@ async def admin_transfer_execute(callback: CallbackQuery, state: FSMContext):
                 try:
                     await callback.bot.send_message(
                         remaining.id,
-                        f"👑 <b>Siz {old_house.name} xonadonining yangi Lordi bo'ldingiz!</b>\n\n"
+                        f"👑 <b>Siz {_html.escape(str(old_house.name) or "")} xonadonining yangi Lordi bo'ldingiz!</b>\n\n"
                         f"Admin tomonidan ko'chirish natijasida avvalgi lord ketdi.",
                         parse_mode="HTML"
                     )
@@ -2502,14 +2502,14 @@ async def admin_transfer_execute(callback: CallbackQuery, state: FSMContext):
         # Natija xabari
         result_text = (
             f"✅ <b>Ko'chirish amalga oshirildi!</b>\n\n"
-            f"👤 {user.full_name}\n"
-            f"🏠 {old_house.name if old_house else '—'} → {target_house.name}\n"
+            f"👤 {_html.escape(str(user.full_name) or "")}\n"
+            f"🏠 {old_house.name if old_house else '—'} → {_html.escape(str(target_house.name) or "")}\n"
             f"👑 Yangi roli: <b>{new_role.value}</b>\n"
         )
         if auto_promoted_name:
-            result_text += f"\n🔄 <b>{old_house.name}</b> da yangi lord: <b>{auto_promoted_name}</b>"
+            result_text += f"\n🔄 <b>{_html.escape(str(old_house.name) or "")}</b> da yangi lord: <b>{auto_promoted_name}</b>"
         elif was_lord and old_house:
-            result_text += f"\n⚠️ <b>{old_house.name}</b> da lord yo'q (a'zo qolmadi)"
+            result_text += f"\n⚠️ <b>{_html.escape(str(old_house.name) or "")}</b> da lord yo'q (a'zo qolmadi)"
 
         await callback.message.answer(result_text, parse_mode="HTML")
 
@@ -2518,7 +2518,7 @@ async def admin_transfer_execute(callback: CallbackQuery, state: FSMContext):
             await callback.bot.send_message(
                 user_id,
                 f"🔀 <b>Siz boshqa xonadonga ko'childingiz!</b>\n\n"
-                f"🏰 Yangi xonadon: <b>{target_house.name}</b>\n"
+                f"🏰 Yangi xonadon: <b>{_html.escape(str(target_house.name) or "")}</b>\n"
                 f"👑 Rolingiz: <b>{new_role.value}</b>",
                 parse_mode="HTML"
             )
@@ -2954,11 +2954,11 @@ async def item_list(callback: CallbackQuery):
         status = "🟢" if item.is_active else "🔴"
         stock_text = "♾" if item.stock_remaining is None else f"📦{item.stock_remaining}"
         lines.append(
-            f"{status} {item.emoji} <b>{item.name}</b> — {item.price:,} tanga  {stock_text}\n"
+            f"{status} {item.emoji} <b>{_html.escape(str(item.name) or "")}</b> — {item.price:,} tanga  {stock_text}\n"
             f"   ⚔️ Hujum: {item.attack_power} | 🛡 Mudofaa: {item.defense_power}"
         )
         buttons.append([InlineKeyboardButton(
-            text=f"{item.emoji} {item.name}",
+            text=f"{item.emoji} {_html.escape(str(item.name) or "")}",
             callback_data=f"admin:item:info:{item.id}"
         )])
 
@@ -2994,7 +2994,7 @@ async def item_info(callback: CallbackQuery):
 
     await callback.answer()
     await callback.message.edit_text(
-        f"{item.emoji} <b>{item.name}</b>\n\n"
+        f"{item.emoji} <b>{_html.escape(str(item.name) or "")}</b>\n\n"
         f"📌 Turi: {type_label}\n"
         f"⚔️ Hujum kuchi: {item.attack_power} askar ekvivalenti\n"
         f"🛡 Mudofaa kuchi: {item.defense_power} chayon ekvivalenti\n"
@@ -3068,7 +3068,7 @@ async def item_edit_menu(callback: CallbackQuery):
     stock_text = "♾ Cheksiz" if item.stock_remaining is None else f"{item.stock_remaining} / {item.max_stock or '?'}"
     try:
         await callback.message.edit_text(
-            f"✏️ <b>{item.emoji} {item.name}</b> — tahrirlash\n\n"
+            f"✏️ <b>{item.emoji} {_html.escape(str(item.name) or "")}</b> — tahrirlash\n\n"
             f"⚔️ Hujum kuchi: <b>{item.attack_power}</b>\n"
             f"🛡 Mudofaa kuchi: <b>{item.defense_power}</b>\n"
             f"💰 Narxi: <b>{item.price:,}</b> tanga\n"
@@ -3113,7 +3113,7 @@ async def item_edit_attack_done(message: Message, state: FSMContext):
         item = await repo.get_by_id(item_id)
     await state.clear()
     await message.answer(
-        f"✅ <b>{item.emoji} {item.name}</b>\n"
+        f"✅ <b>{item.emoji} {_html.escape(str(item.name) or "")}</b>\n"
         f"⚔️ Hujum kuchi: <b>{new_val}</b> ga o'zgartirildi.",
         parse_mode="HTML",
         reply_markup=item_manage_keyboard(item_id, item.is_active),
@@ -3152,7 +3152,7 @@ async def item_edit_defense_done(message: Message, state: FSMContext):
         item = await repo.get_by_id(item_id)
     await state.clear()
     await message.answer(
-        f"✅ <b>{item.emoji} {item.name}</b>\n"
+        f"✅ <b>{item.emoji} {_html.escape(str(item.name) or "")}</b>\n"
         f"🛡 Mudofaa kuchi: <b>{new_val}</b> ga o'zgartirildi.",
         parse_mode="HTML",
         reply_markup=item_manage_keyboard(item_id, item.is_active),
@@ -3190,7 +3190,7 @@ async def item_edit_price_done(message: Message, state: FSMContext):
         item = await repo.get_by_id(item_id)
     await state.clear()
     await message.answer(
-        f"✅ <b>{item.emoji} {item.name}</b>\n"
+        f"✅ <b>{item.emoji} {_html.escape(str(item.name) or "")}</b>\n"
         f"💰 Narxi: <b>{new_val:,}</b> tangaga o'zgartirildi.",
         parse_mode="HTML",
         reply_markup=item_manage_keyboard(item_id, item.is_active),
@@ -3235,7 +3235,7 @@ async def item_edit_stock_done(message: Message, state: FSMContext):
     await state.clear()
     stock_text = "♾ Cheksiz" if max_stock is None else f"{max_stock} ta"
     await message.answer(
-        f"✅ <b>{item.emoji} {item.name}</b>\n"
+        f"✅ <b>{item.emoji} {_html.escape(str(item.name) or "")}</b>\n"
         f"📦 Stok: <b>{stock_text}</b> ga o'zgartirildi.",
         parse_mode="HTML",
         reply_markup=item_manage_keyboard(item_id, item.is_active),
@@ -3815,12 +3815,12 @@ async def admin_house_resources_select(callback: CallbackQuery):
             for hci in hci_rows:
                 item = await custom_repo.get_by_id(hci.item_id)
                 if item:
-                    lines_ci.append(f"  {item.emoji} {item.name}: <b>{hci.quantity}</b> ta")
+                    lines_ci.append(f"  {item.emoji} {_html.escape(str(item.name) or "")}: <b>{hci.quantity}</b> ta")
             if lines_ci:
                 custom_items_text = "\n🎒 Custom itemlar:\n" + "\n".join(lines_ci) + "\n"
 
     text = (
-        f"🏰 <b>{house.name}</b> — Resurs sozlamalari\n\n"
+        f"🏰 <b>{_html.escape(str(house.name) or "")}</b> — Resurs sozlamalari\n\n"
         f"🛒 Bozor kunlik askar limiti: <b>{res.market_buy_limit}</b>\n"
         f"🏦 Bank min qarz: <b>{res.bank_min_loan:,}</b>\n"
         f"🏦 Bank max qarz: <b>{res.bank_max_loan:,}</b>\n"
@@ -3966,13 +3966,13 @@ async def admin_house_items_view(callback: CallbackQuery):
         await callback.answer("ℹ️ Hech qanday custom item yaratilmagan.", show_alert=True)
         return
 
-    lines = [f"🎒 <b>{house.name}</b> — Custom Itemlar\n"]
+    lines = [f"🎒 <b>{_html.escape(str(house.name) or "")}</b> — Custom Itemlar\n"]
     buttons = []
     for item in all_items:
         qty = owned_map.get(item.id, 0)
-        lines.append(f"{item.emoji} {item.name}: <b>{qty}</b> ta")
+        lines.append(f"{item.emoji} {_html.escape(str(item.name) or "")}: <b>{qty}</b> ta")
         buttons.append([InlineKeyboardButton(
-            text=f"✏️ {item.emoji} {item.name} ({qty})",
+            text=f"✏️ {item.emoji} {_html.escape(str(item.name) or "")} ({qty})",
             callback_data=f"admin:hitems:set:{house_id}:{item.id}"
         )])
 
@@ -4017,7 +4017,7 @@ async def admin_house_item_set_start(callback: CallbackQuery, state: FSMContext)
     await state.set_state(HouseItemState.waiting_qty)
     await callback.answer()
     await callback.message.answer(
-        f"✏️ <b>{item.emoji} {item.name}</b>\n\n"
+        f"✏️ <b>{item.emoji} {_html.escape(str(item.name) or "")}</b>\n\n"
         f"Yangi miqdorni kiriting (0 = nolga tushirish):",
         parse_mode="HTML"
     )
