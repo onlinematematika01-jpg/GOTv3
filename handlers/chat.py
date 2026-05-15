@@ -41,7 +41,7 @@ async def chat_menu(message: Message, state: FSMContext):
                 sender = await user_repo.get_by_id(msg.sender_id)
                 sender_name = sender.full_name if sender else "Noma'lum"
                 time_str = msg.created_at.strftime("%H:%M")
-                chat_text += f"[{time_str}] <b>{sender_name}:</b> {msg.content}\n"
+                chat_text += f"[{time_str}] <b>{sender_name}:</b> {_html.escape(str(msg.content) or "")}\n"
         else:
             chat_text = "💬 <b>Ichki Chat</b>\n\nHali xabarlar yo'q. Birinchi bo'ling!"
 
