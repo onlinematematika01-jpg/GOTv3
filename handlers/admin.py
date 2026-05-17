@@ -4073,3 +4073,41 @@ async def admin_house_item_save(message: Message, state: FSMContext):
         f"xonadon uchun yangilandi.",
         parse_mode="HTML"
     )
+
+
+# ─────────────────────────────────────────────────
+# HUKMDORLIK DA'VOSINI VAQTINCHA O'CHIRISH/YOQISH
+# ─────────────────────────────────────────────────
+
+@router.callback_query(F.data == "admin:toggle_claim")
+async def admin_toggle_claim(callback: CallbackQuery):
+    """Hukmdorlik da'vosini vaqtincha o'chirish yoki yoqish"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        current = await cfg.get("claim_disabled") or "false"
+
+        if current.strip().lower() == "true":
+            # Da'voni qayta yoqish
+            await cfg.set("claim_disabled", "false")
+            await callback.answer("✅ Hukmdorlik da'vosi qayta yoqildi.", show_alert=True)
+            await callback.message.edit_text(
+                "✅ <b>Hukmdorlik da'vosi yoqildi!</b>\n\n"
+                "Lordlar endi hukmdorlik da'vosini ochishi mumkin.",
+                parse_mode="HTML",
+                reply_markup=admin_keyboard()
+            )
+        else:
+            # Da'voni o'chirish
+            await cfg.set("claim_disabled", "true")
+            await callback.answer("🚫 Hukmdorlik da'vosi o'chirildi.", show_alert=True)
+            await callback.message.edit_text(
+                "🚫 <b>Hukmdorlik da'vosi vaqtincha o'chirildi!</b>\n\n"
+                "Hech bir lord hukmdorlik da'vosini ocha olmaydi.\n"
+                "Qayta yoqish uchun tugmani bosing.",
+                parse_mode="HTML",
+                reply_markup=admin_keyboard()
+            )
