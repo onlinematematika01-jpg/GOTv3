@@ -88,39 +88,25 @@ async def start_claim(message: Message):
             await message.answer("❌ Xonadoningiz topilmadi.")
             return
 
-        # Vassal bo'lsa — isyon qoidasi tekshiriladi
-        if my_house.is_under_occupation and my_house.vassal_since:
-            days_as_vassal = (datetime.utcnow() - my_house.vassal_since).days
-            if days_as_vassal < 2:
-                remaining = 2 - days_as_vassal
-                await message.answer(
-                    f"⛓️ <b>Isyon uchun vaqt kelgani yo'q!</b>\n\n"
-                    f"Siz vassal bo'lganingizga <b>{days_as_vassal}</b> kun bo'ldi.\n"
-                    f"Isyon qilish uchun kamida <b>2 kun</b> o'tishi kerak.\n"
-                    f"⏳ Yana <b>{remaining}</b> kun kutishingiz lozim.",
-                    parse_mode="HTML"
-                )
-                return
-
-            # BOSQICH 9 — Garnizon nazorati: isyon bloki
-            if my_house.occupier_house_id:
-                garrison_repo = TerritoryGarrisonRepo(session)
-                garrison = await garrison_repo.get_by_region(user.region)
-                if garrison and garrison.soldiers > 0:
-                    hukmdor_house = await house_repo.get_by_id(my_house.occupier_house_id)
-                    all_vassals = await house_repo.get_vassals_by_hukmdor(hukmdor_house.id)
-                    total_vassal_soldiers = sum(h.total_soldiers for h in all_vassals)
-                    half_vassal = total_vassal_soldiers // 2
-                    if garrison.soldiers >= half_vassal:
-                        await message.answer(
-                            f"⛓️ <b>Isyon imkonsiz!</b>\n\n"
-                            f"Hukmdor hududga <b>{garrison.soldiers}</b> askar joylashtirgan.\n"
-                            f"Bu barcha vassal qo'shinining yarmidan "
-                            f"(<b>{half_vassal}</b>) ko'p.\n\n"
-                            f"Avval garnizonni sindirmasdan isyon qila olmaysiz.",
-                            parse_mode="HTML"
-                        )
-                        return
+        # Vassal bo'lsa — garnizon nazorati: isyon bloki
+        if my_house.is_under_occupation and my_house.occupier_house_id:
+            garrison_repo = TerritoryGarrisonRepo(session)
+            garrison = await garrison_repo.get_by_region(user.region)
+            if garrison and garrison.soldiers > 0:
+                hukmdor_house = await house_repo.get_by_id(my_house.occupier_house_id)
+                all_vassals = await house_repo.get_vassals_by_hukmdor(hukmdor_house.id)
+                total_vassal_soldiers = sum(h.total_soldiers for h in all_vassals)
+                half_vassal = total_vassal_soldiers // 2
+                if garrison.soldiers >= half_vassal:
+                    await message.answer(
+                        f"⛓️ <b>Isyon imkonsiz!</b>\n\n"
+                        f"Hukmdor hududga <b>{garrison.soldiers}</b> askar joylashtirgan.\n"
+                        f"Bu barcha vassal qo'shinining yarmidan "
+                        f"(<b>{half_vassal}</b>) ko'p.\n\n"
+                        f"Avval garnizonni sindirmasdan isyon qila olmaysiz.",
+                        parse_mode="HTML"
+                    )
+                    return
 
         # Hududda faqat 1 ta xonadon bo'lsa — da'vo ma'nosiz
         same_region_houses = await house_repo.get_all_by_region(user.region)
