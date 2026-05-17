@@ -24,7 +24,7 @@ from database.engine import AsyncSessionFactory
 from database.repositories import (
     UserRepo, HouseRepo, WarRepo,
     HukmdorClaimRepo, ChronicleRepo,
-    TerritoryGarrisonRepo,
+    TerritoryGarrisonRepo, BotSettingsRepo,
 )
 from database.models import (
     RoleEnum, WarTypeEnum, ClaimStatusEnum,
@@ -61,6 +61,19 @@ async def start_claim(message: Message):
         user_repo = UserRepo(session)
         house_repo = HouseRepo(session)
         claim_repo = HukmdorClaimRepo(session)
+        cfg = BotSettingsRepo(session)
+
+        # Admin da'voni o'chirganmi?
+        claim_disabled = await cfg.get("claim_disabled") or "false"
+        if claim_disabled.strip().lower() == "true":
+            await message.answer(
+                "🚫 <b>Hukmdorlik da'vosi vaqtincha o'chirilgan.</b>
+
+"
+                "Admin tomonidan muvaqqat to'xtatilgan. Keyinroq urinib ko'ring.",
+                parse_mode="HTML"
+            )
+            return
 
         user = await user_repo.get_by_id(message.from_user.id)
 
