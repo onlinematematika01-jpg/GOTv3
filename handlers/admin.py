@@ -4111,3 +4111,224 @@ async def admin_toggle_claim(callback: CallbackQuery):
                 parse_mode="HTML",
                 reply_markup=admin_keyboard()
             )
+
+
+# ═══════════════════════════════════════════════════════════════
+# HUDUD URUSH CHEKLOVLARI (Region War Restrictions)
+# ═══════════════════════════════════════════════════════════════
+
+import json as _json
+
+async def _get_region_restrictions() -> dict:
+    """DB dan hudud cheklovlarini oladi. Format: {RegionEnum.value: {block_soldiers, block_dragons, block_scorpions, blocked_items: [item_id,...]}}"""
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        raw = await cfg.get("region_war_restrictions")
+        if not raw:
+            return {}
+        try:
+            return _json.loads(raw)
+        except Exception:
+            return {}
+
+
+async def _save_region_restrictions(data: dict):
+    async with AsyncSessionFactory() as session:
+        cfg = BotSettingsRepo(session)
+        await cfg.set("region_war_restrictions", _json.dumps(data, ensure_ascii=False))
+
+
+def _region_restrictions_text(restrictions: dict) -> str:
+    from database.models import RegionEnum
+    lines = ["🗺️ <b>Hudud Urush Cheklovlari</b>\n"]
+    for region in RegionEnum:
+        r = restrictions.get(region.value, {})
+        blocked = []
+        if r.get("block_soldiers"):
+            blocked.append("🗡️Askar")
+        if r.get("block_dragons"):
+            blocked.append("🐉Ajdar")
+        if r.get("block_scorpions"):
+            blocked.append("🏹Skorpion")
+        items = r.get("blocked_items", [])
+        if items:
+            blocked.append(f"📦{len(items)} item")
+        status = ", ".join(blocked) if blocked else "✅ Cheklov yo'q"
+        lines.append(f"📍 <b>{region.value}</b>: {status}")
+    return "\n".join(lines)
+
+
+def _region_list_keyboard() -> InlineKeyboardMarkup:
+    from database.models import RegionEnum
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    for region in RegionEnum:
+        builder.button(
+            text=f"📍 {region.value}",
+            callback_data=f"admin:rwr:region:{region.name}"
+        )
+    builder.button(text="🔙 Orqaga", callback_data="admin:back")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+async def _region_detail_keyboard(region_name: str, restrictions: dict) -> InlineKeyboardMarkup:
+    from database.models import RegionEnum
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from database.repositories import CustomItemRepo
+
+    region = RegionEnum[region_name]
+    r = restrictions.get(region.value, {})
+
+    builder = InlineKeyboardBuilder()
+
+    # Asosiy resurslar toggle
+    sol_icon = "🔴" if r.get("block_soldiers") else "🟢"
+    dra_icon = "🔴" if r.get("block_dragons") else "🟢"
+    sco_icon = "🔴" if r.get("block_scorpions") else "🟢"
+
+    builder.button(text=f"{sol_icon} Askar", callback_data=f"admin:rwr:toggle:soldiers:{region_name}")
+    builder.button(text=f"{dra_icon} Ajdar", callback_data=f"admin:rwr:toggle:dragons:{region_name}")
+    builder.button(text=f"{sco_icon} Skorpion", callback_data=f"admin:rwr:toggle:scorpions:{region_name}")
+
+    # Custom itemlar
+    async with AsyncSessionFactory() as session:
+        ci_repo = CustomItemRepo(session)
+        all_items = await ci_repo.get_all()
+
+    blocked_items = r.get("blocked_items", [])
+    for item in all_items:
+        icon = "🔴" if item.id in blocked_items else "🟢"
+        builder.button(
+            text=f"{icon} {item.emoji}{item.name}",
+            callback_data=f"admin:rwr:toggle:item:{region_name}:{item.id}"
+        )
+
+    builder.button(text="🔙 Orqaga", callback_data="admin:rwr:list")
+    builder.adjust(3)
+    return builder.as_markup()
+
+
+@router.callback_query(F.data == "admin:region_war_restrictions")
+async def admin_rwr_main(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    restrictions = await _get_region_restrictions()
+    text = _region_restrictions_text(restrictions)
+    await callback.answer()
+    await callback.message.answer(
+        text + "\n\nHudud tanlang:",
+        reply_markup=_region_list_keyboard(),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "admin:rwr:list")
+async def admin_rwr_list(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+    restrictions = await _get_region_restrictions()
+    text = _region_restrictions_text(restrictions)
+    await callback.answer()
+    await callback.message.edit_text(
+        text + "\n\nHudud tanlang:",
+        reply_markup=_region_list_keyboard(),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("admin:rwr:region:"))
+async def admin_rwr_region(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    region_name = callback.data.split(":")[3]
+    from database.models import RegionEnum
+    region = RegionEnum[region_name]
+
+    restrictions = await _get_region_restrictions()
+    r = restrictions.get(region.value, {})
+
+    blocked = []
+    if r.get("block_soldiers"):  blocked.append("🗡️ Askar")
+    if r.get("block_dragons"):   blocked.append("🐉 Ajdar")
+    if r.get("block_scorpions"): blocked.append("🏹 Skorpion")
+    items = r.get("blocked_items", [])
+    if items:
+        blocked.append(f"📦 {len(items)} ta custom item")
+
+    status_text = "\n".join(f"  🔴 {b}" for b in blocked) if blocked else "  ✅ Hech qanday cheklov yo'q"
+
+    text = (
+        f"📍 <b>{region.value}</b>\n\n"
+        f"Bloklangan resurslar:\n{status_text}\n\n"
+        f"🟢 = ruxsat  |  🔴 = bloklangan\n"
+        f"Toggling orqali o'zgartiring:"
+    )
+
+    kb = await _region_detail_keyboard(region_name, restrictions)
+    await callback.answer()
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("admin:rwr:toggle:"))
+async def admin_rwr_toggle(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Ruxsat yo'q.", show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    # admin:rwr:toggle:soldiers:NORTH  → parts[3]=soldiers, parts[4]=NORTH
+    # admin:rwr:toggle:item:NORTH:5    → parts[3]=item, parts[4]=NORTH, parts[5]=item_id
+    toggle_type = parts[3]
+
+    from database.models import RegionEnum
+    restrictions = await _get_region_restrictions()
+
+    if toggle_type == "item":
+        region_name = parts[4]
+        item_id = int(parts[5])
+        region = RegionEnum[region_name]
+        r = restrictions.setdefault(region.value, {})
+        blocked_items = r.get("blocked_items", [])
+        if item_id in blocked_items:
+            blocked_items.remove(item_id)
+            msg = "✅ Item cheklovi olib tashlandi."
+        else:
+            blocked_items.append(item_id)
+            msg = "🔴 Item bloklandi."
+        r["blocked_items"] = blocked_items
+    else:
+        region_name = parts[4]
+        region = RegionEnum[region_name]
+        r = restrictions.setdefault(region.value, {})
+        key = f"block_{toggle_type}"  # block_soldiers / block_dragons / block_scorpions
+        current = r.get(key, False)
+        r[key] = not current
+        msg = f"🔴 Bloklandi." if not current else "✅ Cheklov olib tashlandi."
+
+    await _save_region_restrictions(restrictions)
+    await callback.answer(msg, show_alert=False)
+
+    # Sahifani yangilash
+    r2 = restrictions.get(RegionEnum[region_name].value, {})
+    blocked = []
+    if r2.get("block_soldiers"):  blocked.append("🗡️ Askar")
+    if r2.get("block_dragons"):   blocked.append("🐉 Ajdar")
+    if r2.get("block_scorpions"): blocked.append("🏹 Skorpion")
+    items = r2.get("blocked_items", [])
+    if items: blocked.append(f"📦 {len(items)} ta custom item")
+
+    status_text = "\n".join(f"  🔴 {b}" for b in blocked) if blocked else "  ✅ Hech qanday cheklov yo'q"
+    region = RegionEnum[region_name]
+    text = (
+        f"📍 <b>{region.value}</b>\n\n"
+        f"Bloklangan resurslar:\n{status_text}\n\n"
+        f"🟢 = ruxsat  |  🔴 = bloklangan\n"
+        f"Toggling orqali o'zgartiring:"
+    )
+    kb = await _region_detail_keyboard(region_name, restrictions)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
