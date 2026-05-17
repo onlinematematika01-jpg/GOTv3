@@ -922,21 +922,65 @@ async def deploy_start(callback: CallbackQuery, state: FSMContext):
                 f"<i>Yangi miqdor ustiga qo'shiladi.</i>"
             )
 
+        # ── Hudud cheklovlarini tekshirish ──────────────────────────────
+        import json as _json
+        from database.repositories import BotSettingsRepo as _BSR
+        cfg = _BSR(session)
+        raw_restr = await cfg.get("region_war_restrictions")
+        restrictions = {}
+        if raw_restr:
+            try:
+                restrictions = _json.loads(raw_restr)
+            except Exception:
+                pass
+
+        # Defender xonadonining hududi cheklovlariga qaraymiz
+        war_obj = war
+        defender_house = await house_repo.get_by_id(
+            war_obj.defender_house_id if war_obj.attacker_house_id == user.house_id
+            else war_obj.attacker_house_id
+        )
+        target_region_value = defender_house.region.value if defender_house else None
+        r = restrictions.get(target_region_value, {}) if target_region_value else {}
+
+        max_soldiers  = 0 if r.get("block_soldiers")  else house.total_soldiers
+        max_dragons   = 0 if r.get("block_dragons")   else house.total_dragons
+        max_scorpions = 0 if r.get("block_scorpions") else house.total_scorpions
+        blocked_item_ids = set(r.get("blocked_items", []))
+
+        # Blok xabari
+        block_notes = []
+        if r.get("block_soldiers"):  block_notes.append("🗡️ Askarlar")
+        if r.get("block_dragons"):   block_notes.append("🐉 Ajdarlar")
+        if r.get("block_scorpions"): block_notes.append("🏹 Skorpionlar")
+
+        restriction_text = ""
+        if block_notes and target_region_value:
+            restriction_text = (
+                f"\n\n⛔ <b>{target_region_value}</b> hududida bloklangan:\n"
+                + "\n".join(f"  🔴 {b}" for b in block_notes)
+            )
+
         await state.update_data(
             war_id=war_id,
-            max_soldiers=house.total_soldiers,
-            max_dragons=house.total_dragons,
-            max_scorpions=house.total_scorpions,
+            max_soldiers=max_soldiers,
+            max_dragons=max_dragons,
+            max_scorpions=max_scorpions,
+            blocked_item_ids=list(blocked_item_ids),
             dep_soldiers=0,
             dep_dragons=0,
             dep_scorpions=0,
         )
         await state.set_state(WarState.deploy_soldiers)
         await callback.answer()
+
+        if max_soldiers == 0 and r.get("block_soldiers"):
+            soldiers_line = f"🗡️ <b>Askarlar bu hududda bloklangan!</b> (0 kiriting)"
+        else:
+            soldiers_line = f"🗡️ <b>Nechta askar yuborasiz?</b>\nMavjud: <b>{max_soldiers}</b> askar\n(0 kiriting — askar yubormaslik)"
+
         await callback.message.answer(
-            f"🗡️ <b>Nechta askar yuborasiz?</b>\n"
-            f"Mavjud: <b>{house.total_soldiers}</b> askar\n"
-            f"(0 kiriting — askar yubormaslik){extra_text}",
+            soldiers_line + restriction_text + (extra_text or ""),
             parse_mode="HTML"
         )
 
@@ -944,60 +988,80 @@ async def deploy_start(callback: CallbackQuery, state: FSMContext):
 @router.message(WarState.deploy_soldiers)
 async def deploy_soldiers_input(message: Message, state: FSMContext):
     data = await state.get_data()
+    max_s = data["max_soldiers"]
     try:
         qty = int(message.text.strip())
-        if qty < 0 or qty > data["max_soldiers"]:
+        if qty < 0 or qty > max_s:
             raise ValueError
     except (ValueError, TypeError):
-        await message.answer(
-            f"❌ 0 dan {data['max_soldiers']} gacha butun son kiriting."
-        )
+        if max_s == 0:
+            await message.answer("⛔ Askarlar bu hududda bloklangan. 0 kiriting.")
+        else:
+            await message.answer(f"❌ 0 dan {max_s} gacha butun son kiriting.")
+        return
+
+    if qty > 0 and max_s == 0:
+        await message.answer("⛔ Askarlar bu hududda bloklangan. 0 kiriting.")
         return
 
     await state.update_data(dep_soldiers=qty)
     await state.set_state(WarState.deploy_dragons)
-    await message.answer(
-        f"🐉 <b>Nechta ajdar yuborasiz?</b>\n"
-        f"Mavjud: <b>{data['max_dragons']}</b> ajdar\n"
-        f"(0 kiriting — ajdar yubormaslik)",
-        parse_mode="HTML"
-    )
+
+    max_d = data["max_dragons"]
+    if max_d == 0:
+        dragon_line = "🐉 <b>Ajdarlar bu hududda bloklangan!</b> (0 kiriting)"
+    else:
+        dragon_line = f"🐉 <b>Nechta ajdar yuborasiz?</b>\nMavjud: <b>{max_d}</b> ajdar\n(0 kiriting — ajdar yubormaslik)"
+    await message.answer(dragon_line, parse_mode="HTML")
 
 
 @router.message(WarState.deploy_dragons)
 async def deploy_dragons_input(message: Message, state: FSMContext):
     data = await state.get_data()
+    max_d = data["max_dragons"]
     try:
         qty = int(message.text.strip())
-        if qty < 0 or qty > data["max_dragons"]:
+        if qty < 0 or qty > max_d:
             raise ValueError
     except (ValueError, TypeError):
-        await message.answer(
-            f"❌ 0 dan {data['max_dragons']} gacha butun son kiriting."
-        )
+        if max_d == 0:
+            await message.answer("⛔ Ajdarlar bu hududda bloklangan. 0 kiriting.")
+        else:
+            await message.answer(f"❌ 0 dan {max_d} gacha butun son kiriting.")
+        return
+
+    if qty > 0 and max_d == 0:
+        await message.answer("⛔ Ajdarlar bu hududda bloklangan. 0 kiriting.")
         return
 
     await state.update_data(dep_dragons=qty)
     await state.set_state(WarState.deploy_scorpions)
-    await message.answer(
-        f"🏹 <b>Nechta skorpion yuborasiz?</b>\n"
-        f"Mavjud: <b>{data['max_scorpions']}</b> skorpion\n"
-        f"(0 kiriting — skorpion yubormaslik)",
-        parse_mode="HTML"
-    )
+
+    max_sc = data["max_scorpions"]
+    if max_sc == 0:
+        scorp_line = "🏹 <b>Skorpionlar bu hududda bloklangan!</b> (0 kiriting)"
+    else:
+        scorp_line = f"🏹 <b>Nechta skorpion yuborasiz?</b>\nMavjud: <b>{max_sc}</b> skorpion\n(0 kiriting — skorpion yubormaslik)"
+    await message.answer(scorp_line, parse_mode="HTML")
 
 
 @router.message(WarState.deploy_scorpions)
 async def deploy_scorpions_input(message: Message, state: FSMContext):
     data = await state.get_data()
+    max_sc = data["max_scorpions"]
     try:
         qty = int(message.text.strip())
-        if qty < 0 or qty > data["max_scorpions"]:
+        if qty < 0 or qty > max_sc:
             raise ValueError
     except (ValueError, TypeError):
-        await message.answer(
-            f"❌ 0 dan {data['max_scorpions']} gacha butun son kiriting."
-        )
+        if max_sc == 0:
+            await message.answer("⛔ Skorpionlar bu hududda bloklangan. 0 kiriting.")
+        else:
+            await message.answer(f"❌ 0 dan {max_sc} gacha butun son kiriting.")
+        return
+
+    if qty > 0 and max_sc == 0:
+        await message.answer("⛔ Skorpionlar bu hududda bloklangan. 0 kiriting.")
         return
 
     await state.update_data(dep_scorpions=qty)
