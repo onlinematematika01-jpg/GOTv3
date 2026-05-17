@@ -67,9 +67,7 @@ async def start_claim(message: Message):
         claim_disabled = await cfg.get("claim_disabled") or "false"
         if claim_disabled.strip().lower() == "true":
             await message.answer(
-                "🚫 <b>Hukmdorlik da'vosi vaqtincha o'chirilgan.</b>
-
-"
+                "\U0001f6ab <b>Hukmdorlik da'vosi vaqtincha o'chirilgan.</b>\n\n"
                 "Admin tomonidan muvaqqat to'xtatilgan. Keyinroq urinib ko'ring.",
                 parse_mode="HTML"
             )
