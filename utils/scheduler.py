@@ -287,7 +287,27 @@ async def _run_war(war, bot, session):
     att_items_before = {row.item_id: row.quantity for row in att_ci_rows}
     def_items_before = {row.item_id: row.quantity for row in def_ci_rows}
 
-    attacker._custom_items = [{"item": row.item, "qty": row.quantity} for row in att_ci_rows]
+    # ── Hudud cheklovlari: bloklangan custom itemlarni jangdan chiqarish ──
+    import json as _json_sched
+    from database.repositories import BotSettingsRepo as _BSR2
+    _cfg2 = _BSR2(session)
+    _raw_restr = await _cfg2.get("region_war_restrictions")
+    _restrictions = {}
+    if _raw_restr:
+        try:
+            _restrictions = _json_sched.loads(_raw_restr)
+        except Exception:
+            pass
+
+    # Defender hududidagi cheklovlar (hujumchiga qo'llanadi)
+    _def_region_val = defender.region.value if hasattr(defender, "region") and defender.region else None
+    _r = _restrictions.get(_def_region_val, {}) if _def_region_val else {}
+    _blocked_item_ids = set(_r.get("blocked_items", []))
+
+    def _filter_items(rows, blocked_ids):
+        return [{"item": row.item, "qty": row.quantity} for row in rows if row.item_id not in blocked_ids]
+
+    attacker._custom_items = _filter_items(att_ci_rows, _blocked_item_ids)
     defender._custom_items = [{"item": row.item, "qty": row.quantity} for row in def_ci_rows]
 
     # Hisob-kitob
